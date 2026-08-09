@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Automated Deployment Portal</title>
+  <link rel="stylesheet" href="style.css"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Plus+Jakarta+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="background-glow"></div>
+  
+  <header class="navbar">
+    <div class="logo">
+      <span class="sparkle">✨</span> AutoGit AI
+    </div>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#architecture">Architecture</a>
+      <a href="https://github.com" target="_blank" class="btn-github">GitHub Repo</a>
+    </nav>
+  </header>
+
+  <main class="hero-container">
+    <div class="badge">🤖 100% Autonomous Telegram Bot -> GitHub -> Deploy</div>
+    <h1>Telegram AI Autonomous Developer</h1>
+    <p class="subtitle">
+      Message your Telegram Bot from anywhere. Gemini AI inspects your code, writes the changes, opens a PR, auto-merges, and deploys live in seconds!
+    </p>
+
+    <div class="status-card">
+      <div class="status-header">
+        <span class="indicator active"></span>
+        <span class="status-text">System Status: <strong>Ready for Telegram Prompts</strong></span>
+      </div>
+      <div class="command-box">
+        <code>/code Add dark mode toggle and dynamic quote widget</code>
+        <button id="copyBtn" onclick="copyCommand()">Copy Command</button>
+      </div>
+    </div>
+  </main>
+
+  <section id="features" class="grid-section">
+    <div class="card">
+      <div class="icon">📱</div>
+      <h3>Telegram Control</h3>
+      <p>Send prompts directly from Telegram on mobile or desktop without opening an IDE.</p>
+    </div>
+    <div class="card">
+      <div class="icon">🧠</div>
+      <h3>Gemini AI Engine</h3>
+      <p>Powered by Google Gemini 2.0 Flash API (Free Tier) for lightning-fast code generation.</p>
+    </div>
+    <div class="card">
+      <div class="icon">🔀</div>
+      <h3>Auto PR & Merge</h3>
+      <p>Creates dedicated feature branches, generates pull requests, and auto-merges cleanly.</p>
+    </div>
+    <div class="card">
+      <div class="icon">🚀</div>
+      <h3>Instant Deployment</h3>
+      <p>Triggers Vercel, Netlify, or GitHub Pages builds automatically upon main branch merge.</p>
+    </div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

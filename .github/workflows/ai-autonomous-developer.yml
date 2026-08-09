@@ -1,0 +1,49 @@
+name: Autonomous AI Developer
+
+on:
+  repository_dispatch:
+    types: [telegram_ai_request, slack_ai_request]
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Code modification prompt'
+        required: true
+        default: 'Add a footer with current year and copyright notice'
+      chat_id:
+        description: 'Telegram Chat ID (optional)'
+        required: false
+
+jobs:
+  ai-develop-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+          enable-cache: true
+
+      - name: Install Dependencies
+        run: uv sync
+
+      - name: Run Autonomous AI Developer
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ github.event.client_payload.chat_id || inputs.chat_id || secrets.TELEGRAM_CHAT_ID }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ github.event.client_payload.channel_id || secrets.SLACK_CHANNEL_ID }}
+          USER_PROMPT: ${{ github.event.client_payload.prompt || inputs.prompt }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          uv run main.py
