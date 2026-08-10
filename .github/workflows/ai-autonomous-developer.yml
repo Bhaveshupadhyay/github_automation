@@ -31,14 +31,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Restore Antigravity Auth Config (~/.gemini/config)
+      - name: Restore Antigravity Auth Config (~/.gemini/oauth_creds.json)
         env:
           AGY_AUTH_CONFIG: ${{ secrets.AGY_AUTH_CONFIG }}
         run: |
           if [ -n "$AGY_AUTH_CONFIG" ]; then
             mkdir -p ~/.gemini
-            echo "$AGY_AUTH_CONFIG" | tr -d '\r\n ' | base64 -d | tar -xzf - -C ~/ || true
-            echo "Successfully restored Antigravity credentials!"
+            echo "$AGY_AUTH_CONFIG" | tr -d '\r\n ' | base64 -d > ~/.gemini/oauth_creds.json
+            echo "Successfully restored Antigravity OAuth credentials to ~/.gemini/oauth_creds.json!"
           fi
 
       - name: Extract Target Repo, Prompt & Slack Thread Identifiers
@@ -83,9 +83,6 @@ jobs:
       - name: Run Antigravity Autonomous Agent Engine
         id: run_agy
         working-directory: workspace_target
-        env:
-          GEMINI_API_KEY: ${{ secrets.AGY_API_KEY }}
-          AGY_API_KEY: ${{ secrets.AGY_API_KEY }}
         run: |
           PROMPT="${{ steps.extract_vars.outputs.user_prompt }}"
           echo "Executing Antigravity Engine with prompt: $PROMPT"
