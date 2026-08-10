@@ -34,6 +34,15 @@ jobs:
       - name: Checkout Workflow Repository
         uses: actions/checkout@v4
 
+      - name: Setup Python & Install Graphify AST Indexer
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Graphify & CLI Tools
+        run: |
+          pip install graphify-cli || true
+
       - name: Install Antigravity CLI (agy)
         run: |
           curl -fsSL https://antigravity.google/cli/install.sh | bash
@@ -102,22 +111,30 @@ jobs:
           echo "Cloning $TARGET_REPO..."
           git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git workspace_target
 
-      - name: Copy Antigravity Rules to Workspace
+      - name: Copy Antigravity Rules & Build Graphify AST Graph
         run: |
           mkdir -p workspace_target/.agents/rules
           cp -r .agents/rules/* workspace_target/.agents/rules/ 2>/dev/null || true
+          
+          cd workspace_target
+          if [ ! -d "graphify-out" ]; then
+            echo "📊 Building Graphify AST Knowledge Graph on runner VM..."
+            graphify update . || true
+          fi
 
-      - name: Run Antigravity Autonomous Agent Engine
+      - name: Run Antigravity Autonomous Agent Engine (Live Streamed Logs)
         id: run_agy
         working-directory: workspace_target
         run: |
           PROMPT="${{ steps.extract_vars.outputs.user_prompt }}"
           EFFORT_VAL="${{ steps.extract_vars.outputs.effort }}"
-          echo "Executing Native Antigravity CLI (agy) with prompt: $PROMPT"
+          echo "=========================================================================="
+          echo "🤖 EXECUTING GOOGLE ANTIGRAVITY CLI (agy) | EFFORT: $EFFORT_VAL"
+          echo "=========================================================================="
+          
           agy --print "$PROMPT" \
             --dangerously-skip-permissions \
-            --effort "$EFFORT_VAL" > ../agy_execution.log 2>&1 || true
-          cat ../agy_execution.log
+            --effort "$EFFORT_VAL" 2>&1 | tee ../agy_execution.log || true
 
       - name: Handle Clarification Requests (Interactive Loop)
         working-directory: workspace_target
@@ -143,7 +160,7 @@ jobs:
             echo "CLARIFICATION_EXIT=true" >> $GITHUB_ENV
           fi
 
-      - name: Push Git Branch & Open Pull Request for Review
+      - name: Clean Up Rules/Skills & Push Git Branch (Open PR)
         if: env.CLARIFICATION_EXIT != 'true'
         working-directory: workspace_target
         env:
@@ -156,6 +173,10 @@ jobs:
           MODEL_NAME: ${{ steps.extract_vars.outputs.model }}
           EFFORT_VAL: ${{ steps.extract_vars.outputs.effort }}
         run: |
+          # Remove injected .agents and rule/skill files so they are NOT committed to the PR
+          rm -rf .agents graphify-out
+          git checkout -- .agents 2>/dev/null || true
+          
           if [ -n "$(git status --porcelain)" ]; then
             TIMESTAMP=$(date +%s)
             BRANCH_NAME="ai-patch-${TIMESTAMP}"
