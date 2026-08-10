@@ -1,74 +1,45 @@
-# ⚡ GitHub Automation (`github_automation`)
+# 🚀 Serverless Antigravity AI Autonomous Developer Setup
 
-Project Location: `/Users/bhaveshupadhyay/IdeaProjects/github_automation`
-
-An autonomous serverless AI agent system powered by **Google Gemini 2.0 Flash**, **Graphify AST Indexing**, **GitHub Actions**, and **Slack / Telegram Webhooks**.
+An enterprise, serverless AI developer pipeline triggered from **Slack** or **Telegram** via **Cloudflare Workers**, executing **Google Antigravity Engine (`agy`)** inside **GitHub Actions** with zero API costs using your Google Pro Account.
 
 ---
 
-## 🛠️ Tooling & Stack
-
-- **Package Manager**: [`uv`](https://github.com/astral-sh/uv) (`>=3.12`)
-- **Architecture**: Clean Architecture (`src/core`, `src/domain`, `src/use_cases`, `src/infrastructure`)
-- **AI Engine**: Google Gemini 2.0 Flash (Tool Calling & Function Calling)
-- **Index Engine**: Graphify AST Knowledge Graph
-- **CI/CD**: GitHub Actions (`uv run main.py`)
-- **Webhooks**: Cloudflare Workers (`cloudflare-worker/slack-worker.js` & `worker.js`)
-
----
-
-## 💻 Local Quickstart with `uv`
-
-1. Navigate to project directory:
-   ```bash
-   cd /Users/bhaveshupadhyay/IdeaProjects/github_automation
-   ```
-2. Copy environment template and populate keys:
-   ```bash
-   cp .env.example .env
-   ```
-3. Sync dependencies:
-   ```bash
-   uv sync
-   ```
-4. Run locally:
-   ```bash
-   ./run_local.sh "Add dark mode toggle"
-   # Or directly:
-   uv run main.py "Add dark mode toggle"
-   ```
-
----
-
-## 🏗️ Clean Architecture Layout
+## 🏗️ Architecture Overview
 
 ```text
-/Users/bhaveshupadhyay/IdeaProjects/github_automation/
-├── pyproject.toml                     # uv project configuration
-├── uv.lock                            # Lockfile
-├── main.py                            # Entry Point & DI Composition Root
-├── run_local.sh                       # Local Runner
-├── src/
-│   ├── core/                          # Configuration, Logger & DI Container
-│   │   ├── config.py                  # Pydantic Settings
-│   │   ├── logger.py                  # Structured Logging
-│   │   ├── dependencies.py            # DI Container Factories
-│   │   └── exceptions.py              # Domain Exceptions
-│   ├── domain/                        # Pure Domain Entities & Interfaces
-│   │   ├── entities.py                # Pydantic Value Objects
-│   │   └── interfaces.py              # Abstract Gateways
-│   ├── use_cases/                     # Application Business Logic
-│   │   └── autonomous_developer.py    # AutonomousDeveloperUseCase
-│   └── infrastructure/                # External Adapters
-│       ├── llm/
-│       │   └── gemini_gateway.py      # Gemini API + Tool Calling Adapter
-│       ├── git/
-│       │   └── github_gateway.py      # Git CLI & GitHub REST API Adapter
-│       ├── indexer/
-│       │   └── graphify_indexer.py    # Graphify AST Indexer Adapter
-│       └── notification/
-│           └── notifier_gateway.py    # Slack & Telegram Composite Notifier
-└── cloudflare-worker/                 # Serverless Webhook Bridges
-    ├── slack-worker.js
-    └── worker.js
+[ Slack / Telegram ] 
+       │
+       ▼ (Webhook Request)
+[ Cloudflare Worker ] 
+       │
+       ▼ (Dispatches GitHub Repository Event)
+[ GitHub Actions Runner VM ]
+       │
+       ├── 1. Restores Google Pro Auth Credentials (AGY_AUTH_CONFIG)
+       ├── 2. Installs & Launches Antigravity CLI (agy run -y "$PROMPT")
+       ├── 3. Executes Multi-Agent Reasoning, AST Graphing & Precision Diffs
+       └── 4. Pushes Branch & Opens GitHub Pull Request (gh pr create)
 ```
+
+---
+
+## 🔑 Setup Instructions
+
+### Step 1: Set Up `AGY_AUTH_CONFIG` Secret in GitHub
+
+1. Copy your Base64 Google Pro Account token string.
+2. Go to your GitHub Repository ➔ **Settings** ➔ **Secrets and variables** ➔ **Actions**.
+3. Create a secret named **`AGY_AUTH_CONFIG`** and paste the value.
+4. Create a secret named **`PAT_TOKEN`** (GitHub Personal Access Token with `repo` scopes).
+
+---
+
+### Step 2: Triggering via Slack or Telegram
+
+Send a message in Slack or Telegram:
+
+```text
+/code owner/repo Add caching to get_trending_posts
+```
+
+Antigravity Engine (`agy`) will execute on GitHub Actions, modify target code in-place, and open a Pull Request ready for review!
