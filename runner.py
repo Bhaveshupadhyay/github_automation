@@ -93,7 +93,7 @@ def get_gemini_api_key():
 
     return ""
 
-def execute_api_call(payload, api_key, model="gemini-3.5-flash-lite"):
+def execute_api_call(payload_dict, api_key, model="gemini-3.5-flash-lite", effort="high"):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
     
@@ -101,6 +101,15 @@ def execute_api_call(payload, api_key, model="gemini-3.5-flash-lite"):
         headers["Authorization"] = f"Bearer {api_key}"
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
+    # Add thinking budget / reasoning effort configuration
+    budget = 8192 if effort == "high" else (4096 if effort == "medium" else 1024)
+    payload_dict["generationConfig"] = {
+        "thinkingConfig": {
+            "thinkingBudget": budget
+        }
+    }
+
+    payload = json.dumps(payload_dict).encode("utf-8")
     req = urllib.request.Request(url, data=payload, headers=headers)
     
     for attempt in range(3):
@@ -118,11 +127,17 @@ def execute_api_call(payload, api_key, model="gemini-3.5-flash-lite"):
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
                 req = urllib.request.Request(url, data=payload, headers=headers)
             else:
+                # Retry without thinkingConfig if endpoint doesn't support it
+                if "thinkingConfig" in payload_dict.get("generationConfig", {}):
+                    payload_dict.pop("generationConfig", None)
+                    payload = json.dumps(payload_dict).encode("utf-8")
+                    req = urllib.request.Request(url, data=payload, headers=headers)
+                    continue
                 raise Exception(f"HTTP Error {e.code}: {e.read().decode('utf-8', errors='ignore')}")
 
     raise Exception("API call failed after retries.")
 
-def run_agent(user_prompt, model_name=None):
+def run_agent(user_prompt, model_name=None, effort="high"):
     api_key = get_gemini_api_key()
     if not api_key:
         print("ERROR: No valid GEMINI_API_KEY / AGY_API_KEY or restored ~/.gemini credentials found.")
@@ -131,7 +146,10 @@ def run_agent(user_prompt, model_name=None):
     if not model_name:
         model_name = os.getenv("AGY_MODEL", os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"))
 
-    print(f"🤖 Active Model: {model_name}")
+    if not effort:
+        effort = os.getenv("AGY_EFFORT", "high")
+
+    print(f"🤖 Active Model: {model_name} | Reasoning Effort: {effort.upper()}")
 
     existing_files = get_existing_repo_files()
     file_tree = "\n".join(existing_files[:100])
@@ -193,8 +211,8 @@ def run_agent(user_prompt, model_name=None):
     commit_msg = f"AI Update: {user_prompt}"
 
     for turn in range(15):
-        payload = json.dumps({"contents": contents, "tools": tools}).encode("utf-8")
-        response = execute_api_call(payload, api_key, model=model_name)
+        payload_dict = {"contents": contents, "tools": tools}
+        response = execute_api_call(payload_dict, api_key, model=model_name, effort=effort)
 
         candidate = response.get("candidates", [{}])[0]
         parts = candidate.get("content", {}).get("parts", [])
@@ -271,7 +289,8 @@ def run_agent(user_prompt, model_name=None):
 if __name__ == "__main__":
     prompt_arg = sys.argv[1] if len(sys.argv) > 1 else os.getenv("USER_PROMPT", "")
     model_arg = sys.argv[2] if len(sys.argv) > 2 else os.getenv("AGY_MODEL", "gemini-3.5-flash-lite")
+    effort_arg = sys.argv[3] if len(sys.argv) > 3 else os.getenv("AGY_EFFORT", "high")
     if prompt_arg:
-        run_agent(prompt_arg, model_name=model_arg)
+        run_agent(prompt_arg, model_name=model_arg, effort=effort_arg)
     else:
         print("No prompt provided.")
