@@ -2,6 +2,10 @@
 .wrangler/
 cloudflare-worker/.wrangler/
 
+# IDE settings
+.idea/
+.vscode/
+
 # Environment files & Secrets
 .env
 *.env
