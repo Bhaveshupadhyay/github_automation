@@ -34,23 +34,22 @@ jobs:
       - name: Checkout Workflow Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python Environment & Install Google Auth
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Google Auth Library
+      - name: Install Antigravity CLI (agy)
         run: |
-          pip install google-auth google-auth-oauthlib || true
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Restore Antigravity Auth Config (~/.gemini/oauth_creds.json)
+      - name: Restore Antigravity Auth & Session Config
         env:
           AGY_AUTH_CONFIG: ${{ secrets.AGY_AUTH_CONFIG }}
+          AGY_SESSION_DATA: ${{ secrets.AGY_SESSION_DATA }}
         run: |
+          mkdir -p ~/.gemini/antigravity-cli ~/.gemini/config
+          if [ -n "$AGY_SESSION_DATA" ]; then
+            echo "$AGY_SESSION_DATA" | tr -d '\r\n ' | base64 -d > ~/.gemini/antigravity-cli/antigravity-oauth-token || true
+          fi
           if [ -n "$AGY_AUTH_CONFIG" ]; then
-            mkdir -p ~/.gemini
             echo "$AGY_AUTH_CONFIG" | tr -d '\r\n ' | base64 -d > ~/.gemini/oauth_creds.json || true
-            echo "Successfully restored Antigravity OAuth credentials to ~/.gemini/oauth_creds.json!"
           fi
 
       - name: Extract Target Repo, Prompt, Model, Effort & Slack Identifiers
@@ -111,17 +110,13 @@ jobs:
       - name: Run Antigravity Autonomous Agent Engine
         id: run_agy
         working-directory: workspace_target
-        env:
-          GEMINI_API_KEY: ${{ secrets.AGY_API_KEY }}
-          AGY_API_KEY: ${{ secrets.AGY_API_KEY }}
-          AGY_MODEL: ${{ steps.extract_vars.outputs.model }}
-          AGY_EFFORT: ${{ steps.extract_vars.outputs.effort }}
         run: |
           PROMPT="${{ steps.extract_vars.outputs.user_prompt }}"
-          MODEL_NAME="${{ steps.extract_vars.outputs.model }}"
           EFFORT_VAL="${{ steps.extract_vars.outputs.effort }}"
-          echo "Executing Antigravity Engine [Model: $MODEL_NAME | Effort: $EFFORT_VAL] with prompt: $PROMPT"
-          python3 ../runner.py "$PROMPT" "$MODEL_NAME" "$EFFORT_VAL" > ../agy_execution.log 2>&1 || true
+          echo "Executing Native Antigravity CLI (agy) with prompt: $PROMPT"
+          agy --print "$PROMPT" \
+            --dangerously-skip-permissions \
+            --effort "$EFFORT_VAL" > ../agy_execution.log 2>&1 || true
           cat ../agy_execution.log
 
       - name: Handle Clarification Requests (Interactive Loop)
