@@ -62,20 +62,11 @@ def parse_llm_files_dict(raw_files_obj, existing_files=None):
     recurse(raw_files_obj)
     return extracted
 
-def get_gemini_api_key():
-    for env_var in ["GEMINI_API_KEY", "AGY_API_KEY", "ANTIGRAVITY_API_KEY"]:
-        val = os.getenv(env_var, "").strip()
-        if val:
-            print(f"Loaded API key from environment variable: {env_var}")
-            return val
-
+def get_oauth_token_from_google_auth():
     gemini_dir = os.path.expanduser("~/.gemini")
     candidate_paths = [
         os.path.join(gemini_dir, "oauth_creds.json"),
-        os.path.join(gemini_dir, ".gemini", "oauth_creds.json"),
-        os.path.join(gemini_dir, "config", "config.json"),
-        os.path.join(gemini_dir, "google_accounts.json"),
-        os.path.join(gemini_dir, "settings.json")
+        os.path.join(gemini_dir, ".gemini", "oauth_creds.json")
     ]
 
     for path in candidate_paths:
@@ -83,25 +74,56 @@ def get_gemini_api_key():
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    if isinstance(data, dict):
-                        token = data.get("access_token") or data.get("api_key") or data.get("token")
-                        if token:
-                            print(f"Loaded credentials from: {path}")
-                            return token
+                    access_token = data.get("access_token")
+                    refresh_token = data.get("refresh_token")
+
+                    # Use google-auth library if available
+                    try:
+                        from google.oauth2.credentials import Credentials
+                        from google.auth.transport.requests import Request
+
+                        creds = Credentials(
+                            token=access_token,
+                            refresh_token=refresh_token,
+                            token_uri="https://oauth2.googleapis.com/token",
+                            client_id=data.get("client_id", "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"),
+                            client_secret=data.get("client_secret", "")
+                        )
+                        if not creds.valid and creds.refresh_token:
+                            req = Request()
+                            creds.refresh(req)
+                            print("⚡ Successfully auto-refreshed Google Pro OAuth token using google-auth library!")
+                            data["access_token"] = creds.token
+                            with open(path, "w", encoding="utf-8") as wf:
+                                json.dump(data, wf)
+                            return creds.token
+                        elif creds.token:
+                            return creds.token
+                    except Exception as ge:
+                        print(f"google-auth lib attempt: {ge}")
+
+                    if access_token:
+                        return access_token
             except Exception as e:
-                print(f"Warning reading {path}: {e}")
+                print(f"Error reading {path}: {e}")
+
+    # Fallback to API Key environment variables if present
+    for env_var in ["GEMINI_API_KEY", "AGY_API_KEY"]:
+        val = os.getenv(env_var, "").strip()
+        if val:
+            return val
 
     return ""
 
-def execute_api_call(payload_dict, api_key, model="gemini-3.5-flash-lite", effort="high"):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+def execute_api_call(payload_dict, auth_token, model="gemini-3.5-flash-lite", effort="high"):
     headers = {"Content-Type": "application/json"}
     
-    if api_key.startswith("ya29."):
-        headers["Authorization"] = f"Bearer {api_key}"
+    if auth_token.startswith("ya29."):
+        headers["Authorization"] = f"Bearer {auth_token}"
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    else:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={auth_token}"
 
-    # Add thinking budget / reasoning effort configuration
     budget = 8192 if effort == "high" else (4096 if effort == "medium" else 1024)
     payload_dict["generationConfig"] = {
         "thinkingConfig": {
@@ -124,10 +146,12 @@ def execute_api_call(payload_dict, api_key, model="gemini-3.5-flash-lite", effor
             elif e.code == 404:
                 print(f"Model {model} 404. Failing over to gemini-3.6-flash...")
                 model = "gemini-3.6-flash"
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                if auth_token.startswith("ya29."):
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+                else:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={auth_token}"
                 req = urllib.request.Request(url, data=payload, headers=headers)
             else:
-                # Retry without thinkingConfig if endpoint doesn't support it
                 if "thinkingConfig" in payload_dict.get("generationConfig", {}):
                     payload_dict.pop("generationConfig", None)
                     payload = json.dumps(payload_dict).encode("utf-8")
@@ -138,9 +162,9 @@ def execute_api_call(payload_dict, api_key, model="gemini-3.5-flash-lite", effor
     raise Exception("API call failed after retries.")
 
 def run_agent(user_prompt, model_name=None, effort="high"):
-    api_key = get_gemini_api_key()
-    if not api_key:
-        print("ERROR: No valid GEMINI_API_KEY / AGY_API_KEY or restored ~/.gemini credentials found.")
+    auth_token = get_oauth_token_from_google_auth()
+    if not auth_token:
+        print("ERROR: No valid Google OAuth credentials (AGY_AUTH_CONFIG) or GEMINI_API_KEY found.")
         sys.exit(1)
 
     if not model_name:
@@ -212,7 +236,7 @@ def run_agent(user_prompt, model_name=None, effort="high"):
 
     for turn in range(15):
         payload_dict = {"contents": contents, "tools": tools}
-        response = execute_api_call(payload_dict, api_key, model=model_name, effort=effort)
+        response = execute_api_call(payload_dict, auth_token, model=model_name, effort=effort)
 
         candidate = response.get("candidates", [{}])[0]
         parts = candidate.get("content", {}).get("parts", [])

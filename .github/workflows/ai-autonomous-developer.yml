@@ -34,10 +34,14 @@ jobs:
       - name: Checkout Workflow Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python Environment
+      - name: Setup Python Environment & Install Google Auth
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Google Auth Library
+        run: |
+          pip install google-auth google-auth-oauthlib || true
 
       - name: Restore Antigravity Auth Config (~/.gemini/oauth_creds.json)
         env:
