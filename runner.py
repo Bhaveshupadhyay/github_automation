@@ -62,44 +62,13 @@ def parse_llm_files_dict(raw_files_obj, existing_files=None):
     recurse(raw_files_obj)
     return extracted
 
-def refresh_oauth_token(refresh_token):
-    token_url = "https://oauth2.googleapis.com/token"
-    client_ids = [
-        ("681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com", ""),
-        ("764086051850-6qr4p6gfd6vhgvu82y448da645p972vb.apps.googleusercontent.com", "d-hnh-e_L_Vb9s7J5_o12z")
-    ]
-
-    for cid, csecret in client_ids:
-        data_dict = {
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": cid
-        }
-        if csecret:
-            data_dict["client_secret"] = csecret
-
-        payload = urllib.parse.urlencode(data_dict).encode("utf-8")
-        req = urllib.request.Request(token_url, data=payload, headers={"Content-Type": "application/x-www-form-urlencoded"})
-        try:
-            with urllib.request.urlopen(req) as resp:
-                res = json.loads(resp.read().decode("utf-8"))
-                new_access = res.get("access_token")
-                if new_access:
-                    print("⚡ Successfully refreshed Google OAuth access token!")
-                    return new_access
-        except Exception as e:
-            pass
-    return None
-
 def get_gemini_api_key():
-    # 1. Environment Variable check
     for env_var in ["GEMINI_API_KEY", "AGY_API_KEY", "ANTIGRAVITY_API_KEY"]:
         val = os.getenv(env_var, "").strip()
         if val:
             print(f"Loaded API key from environment variable: {env_var}")
             return val
 
-    # 2. Comprehensive search in ~/.gemini directory files
     gemini_dir = os.path.expanduser("~/.gemini")
     candidate_paths = [
         os.path.join(gemini_dir, "oauth_creds.json"),
@@ -116,19 +85,6 @@ def get_gemini_api_key():
                     data = json.load(f)
                     if isinstance(data, dict):
                         token = data.get("access_token") or data.get("api_key") or data.get("token")
-                        refresh_token = data.get("refresh_token")
-                        
-                        # Auto-refresh if access token expired
-                        expiry = data.get("expiry_date", 0)
-                        now_ms = time.time() * 1000
-                        if refresh_token and (not token or (expiry and now_ms > expiry - 300000)):
-                            refreshed = refresh_oauth_token(refresh_token)
-                            if refreshed:
-                                data["access_token"] = refreshed
-                                data["expiry_date"] = int(now_ms + 3600000)
-                                with open(path, "w", encoding="utf-8") as wf:
-                                    json.dump(data, wf)
-                                return refreshed
                         if token:
                             print(f"Loaded credentials from: {path}")
                             return token
@@ -159,21 +115,23 @@ def execute_api_call(payload, api_key, model="gemini-3.5-flash-lite"):
             elif e.code == 404:
                 print(f"Model {model} 404. Failing over to gemini-3.6-flash...")
                 model = "gemini-3.6-flash"
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
                 req = urllib.request.Request(url, data=payload, headers=headers)
-            elif e.code == 401:
-                print("OAuth Bearer token expired (401). Retrying...")
-                raise Exception("OAuth token expired")
             else:
                 raise Exception(f"HTTP Error {e.code}: {e.read().decode('utf-8', errors='ignore')}")
 
     raise Exception("API call failed after retries.")
 
-def run_agent(user_prompt):
+def run_agent(user_prompt, model_name=None):
     api_key = get_gemini_api_key()
     if not api_key:
         print("ERROR: No valid GEMINI_API_KEY / AGY_API_KEY or restored ~/.gemini credentials found.")
         sys.exit(1)
+
+    if not model_name:
+        model_name = os.getenv("AGY_MODEL", os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"))
+
+    print(f"🤖 Active Model: {model_name}")
 
     existing_files = get_existing_repo_files()
     file_tree = "\n".join(existing_files[:100])
@@ -236,7 +194,7 @@ def run_agent(user_prompt):
 
     for turn in range(15):
         payload = json.dumps({"contents": contents, "tools": tools}).encode("utf-8")
-        response = execute_api_call(payload, api_key)
+        response = execute_api_call(payload, api_key, model=model_name)
 
         candidate = response.get("candidates", [{}])[0]
         parts = candidate.get("content", {}).get("parts", [])
@@ -300,7 +258,6 @@ def run_agent(user_prompt):
 
         time.sleep(1.5)
 
-    # Write modifications to disk
     for filepath, content in modified_files.items():
         if os.path.isdir(filepath):
             continue
@@ -313,7 +270,8 @@ def run_agent(user_prompt):
 
 if __name__ == "__main__":
     prompt_arg = sys.argv[1] if len(sys.argv) > 1 else os.getenv("USER_PROMPT", "")
+    model_arg = sys.argv[2] if len(sys.argv) > 2 else os.getenv("AGY_MODEL", "gemini-3.5-flash-lite")
     if prompt_arg:
-        run_agent(prompt_arg)
+        run_agent(prompt_arg, model_name=model_arg)
     else:
         print("No prompt provided.")
