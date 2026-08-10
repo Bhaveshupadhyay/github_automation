@@ -62,26 +62,47 @@ def parse_llm_files_dict(raw_files_obj, existing_files=None):
     return extracted
 
 def get_gemini_api_key():
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if api_key:
-        return api_key
+    # 1. Environment Variable check
+    for env_var in ["GEMINI_API_KEY", "AGY_API_KEY", "ANTIGRAVITY_API_KEY"]:
+        val = os.getenv(env_var, "").strip()
+        if val:
+            print(f"Loaded API key from environment variable: {env_var}")
+            return val
 
-    # Try reading token from restored ~/.gemini/
+    # 2. Comprehensive search in ~/.gemini directory files
     gemini_dir = os.path.expanduser("~/.gemini")
-    creds_path = os.path.join(gemini_dir, "oauth_creds.json")
-    if os.path.exists(creds_path):
-        try:
-            with open(creds_path, "r") as f:
-                data = json.load(f)
-                return data.get("access_token") or data.get("api_key") or ""
-        except Exception:
-            pass
+    candidate_paths = [
+        os.path.join(gemini_dir, "oauth_creds.json"),
+        os.path.join(gemini_dir, "config", "config.json"),
+        os.path.join(gemini_dir, "google_accounts.json"),
+        os.path.join(gemini_dir, "settings.json"),
+        os.path.join(gemini_dir, "state.json")
+    ]
+
+    for path in candidate_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        token = data.get("access_token") or data.get("api_key") or data.get("token") or data.get("key")
+                        if token:
+                            print(f"Loaded credentials from: {path}")
+                            return token
+            except Exception as e:
+                print(f"Warning reading {path}: {e}")
 
     return ""
 
 def execute_api_call(payload, api_key, model="gemini-3.5-flash-lite"):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    if api_key.startswith("ya29."):
+        # If it's an OAuth bearer token
+        headers["Authorization"] = f"Bearer {api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+    req = urllib.request.Request(url, data=payload, headers=headers)
     
     for attempt in range(3):
         try:
@@ -93,10 +114,10 @@ def execute_api_call(payload, api_key, model="gemini-3.5-flash-lite"):
                 print(f"Rate limited (429). Retrying in {wait_time}s...")
                 time.sleep(wait_time)
             elif e.code == 404:
-                # Failover to gemini-3.6-flash
                 print(f"Model {model} 404. Failing over to gemini-3.6-flash...")
+                model = "gemini-3.6-flash"
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
-                req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+                req = urllib.request.Request(url, data=payload, headers=headers)
             else:
                 raise Exception(f"HTTP Error {e.code}: {e.read().decode('utf-8', errors='ignore')}")
 
@@ -105,7 +126,7 @@ def execute_api_call(payload, api_key, model="gemini-3.5-flash-lite"):
 def run_agent(user_prompt):
     api_key = get_gemini_api_key()
     if not api_key:
-        print("ERROR: No valid GEMINI_API_KEY or restored ~/.gemini credentials found.")
+        print("ERROR: No valid GEMINI_API_KEY / AGY_API_KEY or restored ~/.gemini credentials found.")
         sys.exit(1)
 
     existing_files = get_existing_repo_files()

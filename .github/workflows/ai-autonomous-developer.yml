@@ -85,6 +85,7 @@ jobs:
         working-directory: workspace_target
         env:
           GEMINI_API_KEY: ${{ secrets.AGY_API_KEY }}
+          AGY_API_KEY: ${{ secrets.AGY_API_KEY }}
         run: |
           PROMPT="${{ steps.extract_vars.outputs.user_prompt }}"
           echo "Executing Antigravity Engine with prompt: $PROMPT"
