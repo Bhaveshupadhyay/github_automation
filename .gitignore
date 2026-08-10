@@ -1,31 +1,27 @@
-# Environment variables
-.env
-.env*.local
+# Cloudflare Wrangler cache
+.wrangler/
+cloudflare-worker/.wrangler/
 
-# Python virtual environments
-.venv/
-venv/
-ENV/
-env/
-
-# Python cache & build outputs
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-build/
-dist/
-*.egg-info/
-
-# IDE & OS files
+# IDE settings
 .idea/
 .vscode/
-*.swp
-*.swo
-.DS_Store
 
-# Logs
-*.log
+# Environment files & Secrets
+.env
+*.env
+*.pem
+
+# Byte-compiled / Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Workspace target build folders
+workspace_target/
+graphify-out/

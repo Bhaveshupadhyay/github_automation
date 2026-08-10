@@ -1,0 +1,8 @@
+name = "slack-antigravity-worker"
+main = "slack-worker.js"
+compatibility_date = "2026-08-10"
+
+[vars]
+WORKFLOW_REPO_OWNER = "bhaveshupadhyay"
+WORKFLOW_REPO_NAME = "github_automation"
+DEFAULT_GITHUB_REPO = "bhaveshupadhyay/hiphomboombox_backend"

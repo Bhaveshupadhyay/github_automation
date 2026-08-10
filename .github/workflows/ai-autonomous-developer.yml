@@ -1,49 +1,185 @@
-name: Autonomous AI Developer
+name: Antigravity Autonomous Developer (AGY Engine)
 
 on:
   repository_dispatch:
-    types: [telegram_ai_request, slack_ai_request]
+    types: [ai_developer_task]
   workflow_dispatch:
     inputs:
-      prompt:
-        description: 'Code modification prompt'
-        required: true
-        default: 'Add a footer with current year and copyright notice'
-      chat_id:
-        description: 'Telegram Chat ID (optional)'
+      target_repo:
+        description: "Target Repository (owner/repo)"
+        required: false
+      user_prompt:
+        description: "User Prompt"
+        required: false
+      slack_channel:
+        description: "Slack Channel ID"
+        required: false
+      slack_thread_ts:
+        description: "Slack Thread Timestamp"
         required: false
 
 jobs:
-  ai-develop-and-deploy:
+  run-agy-agent:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-
+    timeout-minutes: 30
     steps:
-      - name: Checkout Repository
+      - name: Checkout Workflow Repository
         uses: actions/checkout@v4
+
+      - name: Setup Node.js & Python Environment
+        uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
+          node-version: "20"
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - name: Setup Python Environment
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          enable-cache: true
+          python-version: "3.12"
 
-      - name: Install Dependencies
-        run: uv sync
-
-      - name: Run Autonomous AI Developer
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ github.event.client_payload.chat_id || inputs.chat_id || secrets.TELEGRAM_CHAT_ID }}
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL_ID: ${{ github.event.client_payload.channel_id || secrets.SLACK_CHANNEL_ID }}
-          USER_PROMPT: ${{ github.event.client_payload.prompt || inputs.prompt }}
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
+      - name: Install Antigravity CLI (agy) & Graphify
         run: |
-          uv run main.py
+          npm install -g @google/antigravity-cli || true
+          pip install graphify-cli || true
+
+      - name: Restore Antigravity Auth Config (~/.gemini/config)
+        env:
+          AGY_AUTH_CONFIG: ${{ secrets.AGY_AUTH_CONFIG }}
+        run: |
+          if [ -n "$AGY_AUTH_CONFIG" ]; then
+            mkdir -p ~/.gemini
+            echo "$AGY_AUTH_CONFIG" | base64 -d | tar -xzf - -C ~/
+            echo "Successfully restored Antigravity Pro credentials!"
+          else
+            echo "AGY_AUTH_CONFIG secret missing!"
+            exit 1
+          fi
+
+      - name: Extract Target Repo, Prompt & Slack Thread Identifiers
+        id: extract_vars
+        run: |
+          TARGET="${{ github.event.inputs.target_repo }}"
+          PROMPT="${{ github.event.inputs.user_prompt }}"
+          SLACK_CHAN="${{ github.event.inputs.slack_channel }}"
+          SLACK_THREAD="${{ github.event.inputs.slack_thread_ts }}"
+          
+          if [ -z "$TARGET" ]; then
+            TARGET="${{ github.event.client_payload.target_repo }}"
+          fi
+          if [ -z "$PROMPT" ]; then
+            PROMPT="${{ github.event.client_payload.user_prompt }}"
+          fi
+          if [ -z "$SLACK_CHAN" ]; then
+            SLACK_CHAN="${{ github.event.client_payload.slack_channel }}"
+          fi
+          if [ -z "$SLACK_THREAD" ]; then
+            SLACK_THREAD="${{ github.event.client_payload.slack_thread_ts }}"
+          fi
+
+          echo "target_repo=$TARGET" >> $GITHUB_OUTPUT
+          echo "user_prompt=$PROMPT" >> $GITHUB_OUTPUT
+          echo "slack_channel=$SLACK_CHAN" >> $GITHUB_OUTPUT
+          echo "slack_thread_ts=$SLACK_THREAD" >> $GITHUB_OUTPUT
+
+      - name: Clone Target Repository Workspace
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          TARGET_REPO="${{ steps.extract_vars.outputs.target_repo }}"
+          echo "Cloning $TARGET_REPO..."
+          git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git workspace_target
+
+      - name: Copy Antigravity Rules & Build Graphify AST Graph
+        run: |
+          mkdir -p workspace_target/.agents/rules
+          cp -r .agents/rules/* workspace_target/.agents/rules/ 2>/dev/null || true
+          
+          cd workspace_target
+          if [ ! -d "graphify-out" ]; then
+            echo "Generating Graphify AST graph on runner VM..."
+            graphify update . || true
+          fi
+
+      - name: Run Antigravity Autonomous Agent Engine
+        id: run_agy
+        working-directory: workspace_target
+        env:
+          CI: "true"
+          AGY_AUTO_APPROVE: "true"
+          AGY_NON_INTERACTIVE: "true"
+        run: |
+          PROMPT="${{ steps.extract_vars.outputs.user_prompt }}"
+          echo "Executing Antigravity Engine with prompt: $PROMPT"
+          agy run -y "$PROMPT" > ../agy_execution.log 2>&1 || agy run --yolo "$PROMPT" >> ../agy_execution.log 2>&1 || true
+          cat ../agy_execution.log
+
+      - name: Handle Clarification Requests (Interactive Loop)
+        working-directory: workspace_target
+        env:
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ steps.extract_vars.outputs.slack_channel }}
+          SLACK_THREAD: ${{ steps.extract_vars.outputs.slack_thread_ts }}
+        run: |
+          if grep -q "CLARIFICATION_NEEDED:" ../agy_execution.log; then
+            QUESTION=$(grep "CLARIFICATION_NEEDED:" ../agy_execution.log | head -n 1 | sed 's/CLARIFICATION_NEEDED://')
+            echo "Clarification requested by AI: $QUESTION"
+            
+            if [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
+              curl -s -X POST https://slack.com/api/chat.postMessage \
+                -H "Authorization: Bearer ${SLACK_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d json_payload=$(jq -n \
+                  --arg chan "$SLACK_CHANNEL" \
+                  --arg thread "$SLACK_THREAD" \
+                  --arg question "$QUESTION" \
+                  '{channel: $chan, thread_ts: $thread, text: ("❓ *Clarification Needed by Antigravity AI:*\n\n" + $question + "\n\n💬 *Please reply in this thread with the requested detail!*")}')
+            fi
+            echo "CLARIFICATION_EXIT=true" >> $GITHUB_ENV
+          fi
+
+      - name: Push Git Branch & Open Pull Request for Review
+        if: env.CLARIFICATION_EXIT != 'true'
+        working-directory: workspace_target
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ steps.extract_vars.outputs.slack_channel }}
+          SLACK_THREAD: ${{ steps.extract_vars.outputs.slack_thread_ts }}
+          TARGET_REPO: ${{ steps.extract_vars.outputs.target_repo }}
+          USER_PROMPT: ${{ steps.extract_vars.outputs.user_prompt }}
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            TIMESTAMP=$(date +%s)
+            BRANCH_NAME="ai-patch-${TIMESTAMP}"
+            
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git checkout -b $BRANCH_NAME
+            git add .
+            git commit -m "🤖 Antigravity AI Patch: ${USER_PROMPT}"
+            
+            git push https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPO}.git $BRANCH_NAME
+            
+            PR_URL=$(gh pr create \
+              --repo "$TARGET_REPO" \
+              --head "$BRANCH_NAME" \
+              --base "main" \
+              --title "🤖 Antigravity AI Patch: ${USER_PROMPT}" \
+              --body "Automated PR generated by Google Antigravity CLI (\`agy\` Engine).\n\nPrompt: ${USER_PROMPT}\n\n👀 Please review and merge when ready!")
+            
+            echo "PR created: $PR_URL"
+            
+            if [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
+              curl -s -X POST https://slack.com/api/chat.postMessage \
+                -H "Authorization: Bearer ${SLACK_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d json_payload=$(jq -n \
+                  --arg chan "$SLACK_CHANNEL" \
+                  --arg thread "$SLACK_THREAD" \
+                  --arg pr "$PR_URL" \
+                  --arg repo "$TARGET_REPO" \
+                  --arg prompt "$USER_PROMPT" \
+                  '{channel: $chan, thread_ts: $thread, text: ("🚀 *Pull Request Created & Ready for Review!*\n\n📦 *Repository:* `" + $repo + "`\n📌 *Prompt:* `" + $prompt + "`\n🔗 *PR Link:* <" + $pr + "|View Pull Request>\n\n👀 Please review and merge when ready!")}')
+            fi
+          else
+            echo "No file changes were produced by agy."
+          fi
