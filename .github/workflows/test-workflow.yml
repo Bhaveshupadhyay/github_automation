@@ -1,0 +1,29 @@
+name: Run AGY CLI Task
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-agy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Antigravity CLI
+        run: |
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Restore OAuth Token File
+        env:
+          AGY_SESSION_DATA: ${{ secrets.AGY_SESSION_DATA }}
+        run: |
+          mkdir -p ~/.gemini/antigravity-cli
+          echo "$AGY_SESSION_DATA" | base64 -d > ~/.gemini/antigravity-cli/antigravity-oauth-token
+
+      - name: Execute AGY CLI
+        run: |
+          agy -p "Review code and suggest improvements" \
+            --headless \
+            --dangerously-skip-permissions
