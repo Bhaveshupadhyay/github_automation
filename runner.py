@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import urllib.request
+import urllib.parse
 import urllib.error
 
 def get_existing_repo_files(root_dir="."):
@@ -61,6 +62,35 @@ def parse_llm_files_dict(raw_files_obj, existing_files=None):
     recurse(raw_files_obj)
     return extracted
 
+def refresh_oauth_token(refresh_token):
+    token_url = "https://oauth2.googleapis.com/token"
+    client_ids = [
+        ("681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com", ""),
+        ("764086051850-6qr4p6gfd6vhgvu82y448da645p972vb.apps.googleusercontent.com", "d-hnh-e_L_Vb9s7J5_o12z")
+    ]
+
+    for cid, csecret in client_ids:
+        data_dict = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": cid
+        }
+        if csecret:
+            data_dict["client_secret"] = csecret
+
+        payload = urllib.parse.urlencode(data_dict).encode("utf-8")
+        req = urllib.request.Request(token_url, data=payload, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urllib.request.urlopen(req) as resp:
+                res = json.loads(resp.read().decode("utf-8"))
+                new_access = res.get("access_token")
+                if new_access:
+                    print("⚡ Successfully refreshed Google OAuth access token!")
+                    return new_access
+        except Exception as e:
+            pass
+    return None
+
 def get_gemini_api_key():
     # 1. Environment Variable check
     for env_var in ["GEMINI_API_KEY", "AGY_API_KEY", "ANTIGRAVITY_API_KEY"]:
@@ -73,10 +103,10 @@ def get_gemini_api_key():
     gemini_dir = os.path.expanduser("~/.gemini")
     candidate_paths = [
         os.path.join(gemini_dir, "oauth_creds.json"),
+        os.path.join(gemini_dir, ".gemini", "oauth_creds.json"),
         os.path.join(gemini_dir, "config", "config.json"),
         os.path.join(gemini_dir, "google_accounts.json"),
-        os.path.join(gemini_dir, "settings.json"),
-        os.path.join(gemini_dir, "state.json")
+        os.path.join(gemini_dir, "settings.json")
     ]
 
     for path in candidate_paths:
@@ -85,7 +115,20 @@ def get_gemini_api_key():
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, dict):
-                        token = data.get("access_token") or data.get("api_key") or data.get("token") or data.get("key")
+                        token = data.get("access_token") or data.get("api_key") or data.get("token")
+                        refresh_token = data.get("refresh_token")
+                        
+                        # Auto-refresh if access token expired
+                        expiry = data.get("expiry_date", 0)
+                        now_ms = time.time() * 1000
+                        if refresh_token and (not token or (expiry and now_ms > expiry - 300000)):
+                            refreshed = refresh_oauth_token(refresh_token)
+                            if refreshed:
+                                data["access_token"] = refreshed
+                                data["expiry_date"] = int(now_ms + 3600000)
+                                with open(path, "w", encoding="utf-8") as wf:
+                                    json.dump(data, wf)
+                                return refreshed
                         if token:
                             print(f"Loaded credentials from: {path}")
                             return token
@@ -97,8 +140,8 @@ def get_gemini_api_key():
 def execute_api_call(payload, api_key, model="gemini-3.5-flash-lite"):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
+    
     if api_key.startswith("ya29."):
-        # If it's an OAuth bearer token
         headers["Authorization"] = f"Bearer {api_key}"
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
@@ -118,6 +161,9 @@ def execute_api_call(payload, api_key, model="gemini-3.5-flash-lite"):
                 model = "gemini-3.6-flash"
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
                 req = urllib.request.Request(url, data=payload, headers=headers)
+            elif e.code == 401:
+                print("OAuth Bearer token expired (401). Retrying...")
+                raise Exception("OAuth token expired")
             else:
                 raise Exception(f"HTTP Error {e.code}: {e.read().decode('utf-8', errors='ignore')}")
 
