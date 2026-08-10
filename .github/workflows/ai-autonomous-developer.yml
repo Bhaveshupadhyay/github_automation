@@ -9,8 +9,8 @@ on:
         description: 'Code modification prompt'
         required: true
         default: 'Add a footer with current year and copyright notice'
-      chat_id:
-        description: 'Telegram Chat ID (optional)'
+      target_repo:
+        description: 'Target repository (owner/repo)'
         required: false
 
 jobs:
@@ -33,7 +33,9 @@ jobs:
           enable-cache: true
 
       - name: Install Dependencies
-        run: uv sync
+        run: |
+          uv sync
+          uv pip install graphify-tool || true
 
       - name: Run Autonomous AI Developer
         env:
@@ -43,6 +45,7 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ github.event.client_payload.channel_id || secrets.SLACK_CHANNEL_ID }}
           USER_PROMPT: ${{ github.event.client_payload.prompt || inputs.prompt }}
+          TARGET_REPO: ${{ github.event.client_payload.target_repo || inputs.target_repo || github.repository }}
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |

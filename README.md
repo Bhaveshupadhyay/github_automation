@@ -33,9 +33,9 @@ An autonomous serverless AI agent system powered by **Google Gemini 2.0 Flash**,
    ```
 4. Run locally:
    ```bash
-   ./run_local.sh
+   ./run_local.sh "Add dark mode toggle"
    # Or directly:
-   uv run main.py
+   uv run main.py "Add dark mode toggle"
    ```
 
 ---
@@ -49,24 +49,26 @@ An autonomous serverless AI agent system powered by **Google Gemini 2.0 Flash**,
 ├── main.py                            # Entry Point & DI Composition Root
 ├── run_local.sh                       # Local Runner
 ├── src/
-│   ├── core/                          # Configuration & Exceptions
-│   │   ├── config.py
-│   │   └── exceptions.py
+│   ├── core/                          # Configuration, Logger & DI Container
+│   │   ├── config.py                  # Pydantic Settings
+│   │   ├── logger.py                  # Structured Logging
+│   │   ├── dependencies.py            # DI Container Factories
+│   │   └── exceptions.py              # Domain Exceptions
 │   ├── domain/                        # Pure Domain Entities & Interfaces
-│   │   ├── entities.py
-│   │   └── interfaces.py
+│   │   ├── entities.py                # Pydantic Value Objects
+│   │   └── interfaces.py              # Abstract Gateways
 │   ├── use_cases/                     # Application Business Logic
-│   │   └── autonomous_developer.py
+│   │   └── autonomous_developer.py    # AutonomousDeveloperUseCase
 │   └── infrastructure/                # External Adapters
 │       ├── llm/
-│       │   └── gemini_gateway.py
+│       │   └── gemini_gateway.py      # Gemini API + Tool Calling Adapter
 │       ├── git/
-│       │   └── github_gateway.py
+│       │   └── github_gateway.py      # Git CLI & GitHub REST API Adapter
 │       ├── indexer/
-│       │   └── graphify_indexer.py
+│       │   └── graphify_indexer.py    # Graphify AST Indexer Adapter
 │       └── notification/
-│           └── notifier_gateway.py
-└── cloudflare-worker/
+│           └── notifier_gateway.py    # Slack & Telegram Composite Notifier
+└── cloudflare-worker/                 # Serverless Webhook Bridges
     ├── slack-worker.js
     └── worker.js
 ```

@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Dict
 from src.domain.entities import CodeModification, PullRequestResult
 
 class ILLMGateway(ABC):
@@ -13,13 +12,18 @@ class IGitGateway(ABC):
     """Abstract interface for Git operations & Pull Request management."""
 
     @abstractmethod
-    def apply_and_push_changes(self, modification: CodeModification) -> str:
+    def prepare_workspace(self, repository: str) -> None:
+        """Clones or prepares the target repository workspace."""
+        pass
+
+    @abstractmethod
+    def apply_and_push_changes(self, modification: CodeModification, repository: str = "") -> str:
         """Applies files to disk and pushes feature branch. Returns branch name."""
         pass
 
     @abstractmethod
-    def create_and_merge_pr(self, branch_name: str, commit_message: str, user_prompt: str) -> PullRequestResult:
-        """Creates pull request via GitHub API and auto-merges it."""
+    def create_and_merge_pr(self, branch_name: str, commit_message: str, user_prompt: str, repository: str = "", auto_merge: bool = False) -> PullRequestResult:
+        """Creates pull request via GitHub API and optionally auto-merges it."""
         pass
 
 class IIndexerGateway(ABC):

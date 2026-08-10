@@ -1,18 +1,16 @@
 /**
- * Cloudflare Worker: Telegram Webhook Bridge to GitHub Actions
+ * Cloudflare Worker: Multi-Repository Telegram Webhook Bridge to GitHub Actions
  * Free serverless worker (100k free requests/day)
  * 
- * Env Variables Required in Cloudflare Worker Dashboard:
- * - GITHUB_PAT: Personal Access Token with repo scope
- * - GITHUB_REPO: "your-username/your-repo-name"
- * - TELEGRAM_BOT_TOKEN: Token from @BotFather
- * - ALLOWED_CHAT_ID: Your personal Telegram Chat ID (Security measure!)
+ * Syntax:
+ * 1. Default Repo:   /code Add dark mode toggle
+ * 2. Specific Repo:  /code owner/repo-name Add dark mode toggle
  */
 
 export default {
   async fetch(request, env) {
     if (request.method !== 'POST') {
-      return new Response('Telegram Webhook Listener OK', { status: 200 });
+      return new Response('Telegram Multi-Repo Listener OK', { status: 200 });
     }
 
     try {
@@ -26,47 +24,50 @@ export default {
       const chatId = message.chat.id;
       const text = message.text.trim();
 
-      // Security check: Only process messages from your Telegram user/chat ID
       if (env.ALLOWED_CHAT_ID && chatId.toString() !== env.ALLOWED_CHAT_ID.toString()) {
         await sendTelegramReply(env.TELEGRAM_BOT_TOKEN, chatId, '⛔ Unauthorized user.');
         return new Response('Forbidden', { status: 403 });
       }
 
-      // Check if command starts with /code or message text
-      let prompt = text;
-      if (text.startsWith('/code')) {
-        prompt = text.replace('/code', '').trim();
-      }
+      let rawText = text.startsWith('/code') ? text.replace('/code', '').trim() : text;
 
-      if (!prompt || prompt === '/start') {
+      if (!rawText || rawText === '/start') {
         await sendTelegramReply(
           env.TELEGRAM_BOT_TOKEN,
           chatId,
-          '👋 *Welcome to Autonomous AI Code Bot!*\n\nUsage: Send `/code <your modification prompt>` or any text request.\nExample: `/code Add a dark mode toggle button`'
+          '👋 *Welcome to Autonomous Multi-Repo AI Developer!*\n\n*Usage:*\n• `/code <prompt>` (Default repo)\n• `/code <owner/repo> <prompt>` (Target specific repo)'
         );
         return new Response('OK', { status: 200 });
       }
 
-      // Send initial acknowledgement to Telegram
+      let targetRepo = env.DEFAULT_GITHUB_REPO;
+      let prompt = rawText;
+
+      const words = rawText.split(' ');
+      if (words.length > 1 && words[0].includes('/')) {
+        targetRepo = words[0];
+        prompt = words.slice(1).join(' ');
+      }
+
       await sendTelegramReply(
         env.TELEGRAM_BOT_TOKEN,
         chatId,
-        `⏳ *Request Received!*\nDispatching task to GitHub Actions...\n\n*Prompt:* \`${prompt}\``
+        `⚡ *AI Developer Triggered!*\n> 📦 *Target Repo:* \`${targetRepo}\`\n> 📝 *Prompt:* \`${prompt}\`\n\n🔍 Dispatching to GitHub Actions...`
       );
 
-      // Trigger GitHub Repository Dispatch Event
-      const ghResponse = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/dispatches`, {
+      const ghResponse = await fetch(`https://api.github.com/repos/${targetRepo}/dispatches`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${env.GITHUB_PAT}`,
           'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'Cloudflare-Telegram-Bot',
+          'User-Agent': 'Cloudflare-Telegram-MultiRepo-Bot',
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           event_type: 'telegram_ai_request',
           client_payload: {
             prompt: prompt,
+            target_repo: targetRepo,
             chat_id: chatId.toString()
           }
         })
@@ -77,7 +78,7 @@ export default {
         await sendTelegramReply(
           env.TELEGRAM_BOT_TOKEN,
           chatId,
-          `❌ *Failed to trigger GitHub Action*: \`${ghResponse.status} - ${errorText}\``
+          `❌ *GitHub Dispatch Failed for \`${targetRepo}\`*: \`${ghResponse.status} - ${errorText}\``
         );
       }
 
@@ -92,10 +93,6 @@ async function sendTelegramReply(botToken, chatId, text) {
   await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: text,
-      parse_mode: 'Markdown'
-    })
+    body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' })
   });
 }

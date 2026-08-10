@@ -1,6 +1,7 @@
 import json
 import urllib.request
 from src.domain.interfaces import INotifierGateway
+from src.core.logger import logger
 
 class CompositeNotifierAdapter(INotifierGateway):
     """Adapter sending notifications to both Telegram and Slack if credentials exist."""
@@ -18,7 +19,7 @@ class CompositeNotifierAdapter(INotifierGateway):
         self.slack_channel_id = slack_channel_id
 
     def notify(self, message: str) -> None:
-        print(f"[Notifier] {message}")
+        logger.info(f"Notification Outbound: {message.replace('\n', ' ')}")
         if self.telegram_token and self.telegram_chat_id:
             self._send_telegram(message)
         if self.slack_token and self.slack_channel_id:
@@ -30,9 +31,9 @@ class CompositeNotifierAdapter(INotifierGateway):
         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req):
-                pass
+                logger.info("Telegram message dispatched successfully.")
         except Exception as e:
-            print(f"[Telegram Error] {e}")
+            logger.error(f"Telegram notification dispatch error: {e}")
 
     def _send_slack(self, text: str) -> None:
         url = "https://slack.com/api/chat.postMessage"
@@ -44,6 +45,6 @@ class CompositeNotifierAdapter(INotifierGateway):
         req = urllib.request.Request(url, data=payload, headers=headers)
         try:
             with urllib.request.urlopen(req):
-                pass
+                logger.info("Slack message dispatched successfully.")
         except Exception as e:
-            print(f"[Slack Error] {e}")
+            logger.error(f"Slack notification dispatch error: {e}")

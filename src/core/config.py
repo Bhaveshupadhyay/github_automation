@@ -3,10 +3,6 @@ from pydantic import Field, AliasChoices
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    """
-    Enterprise Pydantic Settings class.
-    Automatically loads from environment variables and local .env file.
-    """
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -14,27 +10,20 @@ class Settings(BaseSettings):
         case_sensitive=False
     )
 
-    gemini_api_key: str = Field(
-        default="",
-        description="Google Gemini API Key from Google AI Studio"
-    )
+    gemini_api_key: str = Field(default="", description="Google Gemini API Key from Google AI Studio")
+    gemini_model: str = Field(default="gemini-3.5-flash-lite", description="Gemini API Model Name")
+    max_turns: int = Field(default=25, description="Maximum agent tool loop turns")
     github_token: str = Field(
         default="",
         validation_alias=AliasChoices("GITHUB_TOKEN", "PAT_TOKEN"),
         description="GitHub Personal Access Token"
     )
-    github_repository: str = Field(
-        default="",
-        description="GitHub Repository name (owner/repo)"
-    )
-    user_prompt: str = Field(
-        default="",
-        description="User prompt request from Slack/Telegram"
-    )
+    github_repository: str = Field(default="", description="GitHub Repository name (owner/repo)")
+    user_prompt: str = Field(default="", description="User prompt request from Slack/Telegram")
+    auto_merge_pr: bool = Field(default=False, description="Whether to auto-merge PRs (Default: False)")
     
     telegram_bot_token: str = Field(default="", description="Telegram Bot Token")
     telegram_chat_id: str = Field(default="", description="Telegram Chat ID")
-    
     slack_bot_token: str = Field(default="", description="Slack Bot Token")
     slack_channel_id: str = Field(
         default="",
@@ -42,5 +31,9 @@ class Settings(BaseSettings):
         description="Slack Channel ID"
     )
 
+@lru_cache
+def get_settings() -> Settings:
+    """Cached Singleton getter."""
+    return Settings()
 
-settings:Settings = Settings()
+settings = get_settings()

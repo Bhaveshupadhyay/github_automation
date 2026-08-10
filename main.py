@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Application Main Entry Point & Dependency Injection Container
-Follows Clean Architecture principles.
+Application Main Entry Point
+Uses Clean Architecture & Dependency Injection Container.
+Supports prompt via CLI arguments (`uv run main.py "owner/repo prompt"`) or environment variables.
 """
 
 import sys
@@ -11,46 +12,42 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from src.core.config import settings
+from src.core.logger import logger
+from src.core.dependencies import get_autonomous_developer_use_case
 from src.domain.entities import CodeChangeRequest
-from src.use_cases.autonomous_developer import AutonomousDeveloperUseCase
-from src.infrastructure.llm.gemini_gateway import GeminiLLMAdapter
-from src.infrastructure.git.github_gateway import GitHubGitAdapter
-from src.infrastructure.indexer.graphify_indexer import GraphifyIndexerAdapter
-from src.infrastructure.notification.notifier_gateway import CompositeNotifierAdapter
 
-def main():
-    if not settings.user_prompt:
-        print("No user prompt provided. Exiting.")
+def main() -> None:
+    # 1. Determine Raw Prompt from CLI Argument or Env Variable
+    raw_prompt = sys.argv[1] if len(sys.argv) > 1 else settings.user_prompt
+
+    if not raw_prompt:
+        logger.warning("No prompt provided via CLI argument or USER_PROMPT environment variable. Exiting.")
+        logger.info("Usage: uv run main.py \"<owner/repo> <your prompt>\" OR set GITHUB_REPOSITORY & USER_PROMPT in .env")
         sys.exit(0)
 
-    # 1. Dependency Injection Assembly (Composition Root using Singleton Settings)
-    llm_gateway = GeminiLLMAdapter(api_key=settings.gemini_api_key)
-    git_gateway = GitHubGitAdapter(
-        github_token=settings.github_token,
-        repository=settings.github_repository
-    )
-    indexer_gateway = GraphifyIndexerAdapter()
-    notifier_gateway = CompositeNotifierAdapter(
-        telegram_token=settings.telegram_bot_token,
-        telegram_chat_id=settings.telegram_chat_id,
-        slack_token=settings.slack_bot_token,
-        slack_channel_id=settings.slack_channel_id
-    )
+    # 2. Parse target repository if prompt starts with "owner/repo"
+    target_repo = os.getenv("TARGET_REPO", settings.github_repository)
+    prompt = raw_prompt.strip()
 
-    # 2. Instantiate Use Case
-    use_case = AutonomousDeveloperUseCase(
-        llm_gateway=llm_gateway,
-        git_gateway=git_gateway,
-        indexer_gateway=indexer_gateway,
-        notifier_gateway=notifier_gateway
-    )
+    words = prompt.split(" ")
+    if len(words) > 1 and "/" in words[0]:
+        target_repo = words[0]
+        prompt = " ".join(words[1:])
+        logger.info(f"Parsed target repository from prompt argument: '{target_repo}'")
 
-    # 3. Execute Use Case
+    logger.info(f"Starting Autonomous Developer Execution for repo '{target_repo}' with prompt: '{prompt}'")
+
+    # 3. Inject dependencies and construct use case via DI Container
+    use_case = get_autonomous_developer_use_case()
+
+    # 4. Execute Use Case with dynamic repository!
     request = CodeChangeRequest(
-        user_prompt=settings.user_prompt,
-        repository=settings.github_repository
+        user_prompt=prompt,
+        repository=target_repo
     )
     use_case.execute(request)
+
+    logger.info("Autonomous Developer Execution finished successfully.")
 
 if __name__ == "__main__":
     main()
