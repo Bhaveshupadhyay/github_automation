@@ -23,23 +23,33 @@ An enterprise, serverless AI developer pipeline triggered from **Slack** or **Te
 
 ---
 
-## 🔑 Setup Instructions
+## 🔑 Required Secrets Setup
 
-### Step 1: Set Up `AGY_AUTH_CONFIG` Secret in GitHub
+### 1. GitHub Repository Secrets (`github_automation`)
 
-1. Copy your Base64 Google Pro Account token string.
-2. Go to your GitHub Repository ➔ **Settings** ➔ **Secrets and variables** ➔ **Actions**.
-3. Create a secret named **`AGY_AUTH_CONFIG`** and paste the value.
-4. Create a secret named **`PAT_TOKEN`** (GitHub Personal Access Token with `repo` scopes).
+| Secret Name | Description |
+| :--- | :--- |
+| `AGY_AUTH_CONFIG` | Base64-encoded `~/.gemini/config` containing Google Pro OAuth session |
+| `PAT_TOKEN` | GitHub Personal Access Token (Classic) with `repo` and `workflow` scopes |
+| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (`xoxb-...`) |
 
 ---
 
-### Step 2: Triggering via Slack or Telegram
+### 2. Cloudflare Worker Secrets (`wrangler secret put`)
 
-Send a message in Slack or Telegram:
+| Secret Name | Description |
+| :--- | :--- |
+| `GITHUB_PAT` | GitHub Personal Access Token (`ghp_...`) for `repository_dispatch` |
+| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (`xoxb-...`) for thread messaging |
+
+---
+
+## 💬 Usage
+
+Send a command in Slack or Telegram:
 
 ```text
-/code owner/repo Add caching to get_trending_posts
+/code bhaveshupadhyay/hiphomboombox_backend Add caching to get_trending_posts
 ```
 
-Antigravity Engine (`agy`) will execute on GitHub Actions, modify target code in-place, and open a Pull Request ready for review!
+Antigravity Engine (`agy`) will execute on GitHub Actions, modify target code in-place, and open a Pull Request ready for human review!

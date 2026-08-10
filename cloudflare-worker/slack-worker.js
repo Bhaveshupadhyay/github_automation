@@ -24,7 +24,7 @@ export default {
         const userId = formData.get("user_id") || "";
 
         if (!text.trim()) {
-          return new Response("Usage: `/code owner/repo <your prompt>`", { status: 200 });
+          return new Response("Usage: `/code [owner/repo] <your prompt>`", { status: 200 });
         }
 
         ctx.waitUntil(handleSlackCommand(text, channelId, userId, env));
@@ -61,7 +61,7 @@ export default {
             return new Response("OK", { status: 200 });
           }
 
-          // Case B: Direct App Mention (@bot owner/repo prompt)
+          // Case B: Direct App Mention (@bot [owner/repo] prompt)
           if (event.type === "app_mention" && event.text) {
             const cleanText = event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
             ctx.waitUntil(handleSlackCommand(cleanText, event.channel, event.user, env, event.ts));
@@ -81,32 +81,44 @@ export default {
  * Dispatches GitHub Actions workflow for Slack Commands or App Mentions.
  */
 async function handleSlackCommand(text, channelId, userId, env, threadTs = null) {
-  const parts = text.trim().split(" ");
+  const parts = text.trim().split(/\s+/);
   let repo = env.DEFAULT_GITHUB_REPO || "";
-  let prompt = text;
+  let prompt = text.trim();
 
-  if (parts.length > 1 && parts[0].includes("/")) {
+  // Strict regex for owner/repo pattern (e.g., bhaveshupadhyay/hiphomboombox_backend)
+  const ownerRepoRegex = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+  if (parts.length > 1 && ownerRepoRegex.test(parts[0])) {
     repo = parts[0];
     prompt = parts.slice(1).join(" ");
+  }
+
+  if (!repo) {
+    console.error("No target repository configured or specified.");
+    return;
   }
 
   // 1. Post initial Slack message to establish thread context
   let slackThreadTs = threadTs;
   if (!slackThreadTs && env.SLACK_BOT_TOKEN) {
-    const postRes = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        channel: channelId,
-        text: `🤖 *Antigravity AI Triggered*\n📦 *Repo:* \`${repo}\`\n📌 *Prompt:* \`${prompt}\`\n\n🧠 Initializing Antigravity Engine on GitHub Actions...`
-      })
-    });
-    const postData = await postRes.json();
-    if (postData.ok) {
-      slackThreadTs = postData.ts;
+    try {
+      const postRes = await fetch("https://slack.com/api/chat.postMessage", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          channel: channelId,
+          text: `🤖 *Antigravity AI Triggered*\n📦 *Repo:* \`${repo}\`\n📌 *Prompt:* \`${prompt}\`\n\n🧠 Initializing Antigravity Engine on GitHub Actions...`
+        })
+      });
+      const postData = await postRes.json();
+      if (postData.ok) {
+        slackThreadTs = postData.ts;
+      }
+    } catch (e) {
+      console.error("Failed to post initial Slack message:", e);
     }
   }
 
@@ -127,20 +139,24 @@ async function handleSlackThreadReply(event, env) {
   let targetRepo = env.DEFAULT_GITHUB_REPO || "";
 
   if (env.SLACK_BOT_TOKEN) {
-    const threadRes = await fetch(`https://slack.com/api/conversations.replies?channel=${channelId}&ts=${threadTs}&limit=5`, {
-      headers: { "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}` }
-    });
-    const threadData = await threadRes.json();
-    if (threadData.ok && threadData.messages && threadData.messages.length > 0) {
-      const parentMsg = threadData.messages[0].text || "";
-      const repoMatch = parentMsg.match(/Repo:\*\s*`([^`]+)`/);
-      if (repoMatch) {
-        targetRepo = repoMatch[1];
+    try {
+      const threadRes = await fetch(`https://slack.com/api/conversations.replies?channel=${channelId}&ts=${threadTs}&limit=5`, {
+        headers: { "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}` }
+      });
+      const threadData = await threadRes.json();
+      if (threadData.ok && threadData.messages && threadData.messages.length > 0) {
+        const parentMsg = threadData.messages[0].text || "";
+        const repoMatch = parentMsg.match(/Repo:\*\s*`([^`]+)`/);
+        if (repoMatch) {
+          targetRepo = repoMatch[1];
+        }
+        const promptMatch = parentMsg.match(/Prompt:\*\s*`([^`]+)`/);
+        if (promptMatch) {
+          parentPrompt = promptMatch[1];
+        }
       }
-      const promptMatch = parentMsg.match(/Prompt:\*\s*`([^`]+)`/);
-      if (promptMatch) {
-        parentPrompt = promptMatch[1];
-      }
+    } catch (e) {
+      console.error("Failed to fetch Slack thread replies:", e);
     }
   }
 
@@ -148,18 +164,22 @@ async function handleSlackThreadReply(event, env) {
 
   // Inform thread that execution is resuming
   if (env.SLACK_BOT_TOKEN) {
-    await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        channel: channelId,
-        thread_ts: threadTs,
-        text: `⚡ *Clarification Received!* Resuming Antigravity Engine execution with: \`${userReply}\`...`
-      })
-    });
+    try {
+      await fetch("https://slack.com/api/chat.postMessage", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          channel: channelId,
+          thread_ts: threadTs,
+          text: `⚡ *Clarification Received!* Resuming Antigravity Engine execution with: \`${userReply}\`...`
+        })
+      });
+    } catch (e) {
+      console.error("Failed to post resuming Slack message:", e);
+    }
   }
 
   // Dispatch resumed GitHub Action workflow event
@@ -167,26 +187,39 @@ async function handleSlackThreadReply(event, env) {
 }
 
 /**
- * Dispatches repository_dispatch API event to GitHub Actions.
+ * Dispatches repository_dispatch API event to GitHub Actions with timeout and error handling.
  */
 async function dispatchGitHubWorkflow(repo, prompt, channelId, threadTs, env) {
-  const dispatchUrl = `https://api.github.com/repos/${env.WORKFLOW_REPO_OWNER}/${env.WORKFLOW_REPO_NAME}/dispatches`;
+  const owner = env.WORKFLOW_REPO_OWNER || "bhaveshupadhyay";
+  const repoName = env.WORKFLOW_REPO_NAME || "github_automation";
+  const dispatchUrl = `https://api.github.com/repos/${owner}/${repoName}/dispatches`;
   
-  await fetch(dispatchUrl, {
-    method: "POST",
-    headers: {
-      "Authorization": `token ${env.GITHUB_PAT}`,
-      "Accept": "application/vnd.github.v3+json",
-      "User-Agent": "Cloudflare-Worker-Antigravity"
-    },
-    body: JSON.stringify({
-      event_type: "ai_developer_task",
-      client_payload: {
-        target_repo: repo,
-        user_prompt: prompt,
-        slack_channel: channelId,
-        slack_thread_ts: threadTs
-      }
-    })
-  });
+  try {
+    const res = await fetch(dispatchUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `token ${env.GITHUB_PAT}`,
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Cloudflare-Worker-Antigravity"
+      },
+      body: JSON.stringify({
+        event_type: "ai_developer_task",
+        client_payload: {
+          target_repo: repo,
+          user_prompt: prompt,
+          slack_channel: channelId,
+          slack_thread_ts: threadTs
+        }
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`GitHub API dispatch failed (${res.status}): ${errText}`);
+    } else {
+      console.log(`Successfully dispatched GitHub workflow for target repo: ${repo}`);
+    }
+  } catch (err) {
+    console.error("Error dispatching GitHub workflow:", err);
+  }
 }
