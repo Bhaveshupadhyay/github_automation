@@ -62,7 +62,22 @@ def parse_llm_files_dict(raw_files_obj, existing_files=None):
     recurse(raw_files_obj)
     return extracted
 
-def get_oauth_token_from_google_auth():
+def get_auth_credential():
+    # 1. Environment Variable check (AGY_API_KEY / GEMINI_API_KEY takes TOP priority)
+    for env_var in ["GEMINI_API_KEY", "AGY_API_KEY", "ANTIGRAVITY_API_KEY"]:
+        val = os.getenv(env_var, "").strip()
+        if val and val.startswith("AIza"):
+            print(f"🔑 Loaded API Key from environment variable: {env_var}")
+            return val
+
+    # 2. Check for any environment variable key
+    for env_var in ["GEMINI_API_KEY", "AGY_API_KEY", "ANTIGRAVITY_API_KEY"]:
+        val = os.getenv(env_var, "").strip()
+        if val:
+            print(f"🔑 Loaded token from environment variable: {env_var}")
+            return val
+
+    # 3. Fallback search in ~/.gemini directory files
     gemini_dir = os.path.expanduser("~/.gemini")
     candidate_paths = [
         os.path.join(gemini_dir, "oauth_creds.json"),
@@ -77,7 +92,6 @@ def get_oauth_token_from_google_auth():
                     access_token = data.get("access_token")
                     refresh_token = data.get("refresh_token")
 
-                    # Use google-auth library if available
                     try:
                         from google.oauth2.credentials import Credentials
                         from google.auth.transport.requests import Request
@@ -92,7 +106,7 @@ def get_oauth_token_from_google_auth():
                         if not creds.valid and creds.refresh_token:
                             req = Request()
                             creds.refresh(req)
-                            print("⚡ Successfully auto-refreshed Google Pro OAuth token using google-auth library!")
+                            print("⚡ Refreshed Google OAuth token!")
                             data["access_token"] = creds.token
                             with open(path, "w", encoding="utf-8") as wf:
                                 json.dump(data, wf)
@@ -100,18 +114,12 @@ def get_oauth_token_from_google_auth():
                         elif creds.token:
                             return creds.token
                     except Exception as ge:
-                        print(f"google-auth lib attempt: {ge}")
+                        pass
 
                     if access_token:
                         return access_token
             except Exception as e:
                 print(f"Error reading {path}: {e}")
-
-    # Fallback to API Key environment variables if present
-    for env_var in ["GEMINI_API_KEY", "AGY_API_KEY"]:
-        val = os.getenv(env_var, "").strip()
-        if val:
-            return val
 
     return ""
 
@@ -162,9 +170,9 @@ def execute_api_call(payload_dict, auth_token, model="gemini-3.5-flash-lite", ef
     raise Exception("API call failed after retries.")
 
 def run_agent(user_prompt, model_name=None, effort="high"):
-    auth_token = get_oauth_token_from_google_auth()
+    auth_token = get_auth_credential()
     if not auth_token:
-        print("ERROR: No valid Google OAuth credentials (AGY_AUTH_CONFIG) or GEMINI_API_KEY found.")
+        print("ERROR: No valid AGY_API_KEY / GEMINI_API_KEY or restored ~/.gemini credentials found.")
         sys.exit(1)
 
     if not model_name:
