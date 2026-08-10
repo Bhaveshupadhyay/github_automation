@@ -19,11 +19,12 @@ jobs:
         env:
           AGY_SESSION_DATA: ${{ secrets.AGY_SESSION_DATA }}
         run: |
-          mkdir -p ~/.gemini/antigravity-cli
-          echo "$AGY_SESSION_DATA" | base64 -d > ~/.gemini/antigravity-cli/antigravity-oauth-token
+          if [ -n "$AGY_SESSION_DATA" ]; then
+            mkdir -p ~/.gemini/antigravity-cli
+            echo "$AGY_SESSION_DATA" | tr -d '\r\n ' | base64 -d > ~/.gemini/antigravity-cli/antigravity-oauth-token || true
+          fi
 
       - name: Execute AGY CLI
         run: |
-          agy -p "Review code and suggest improvements" \
-            --headless \
+          agy --print "Review code and suggest improvements" \
             --dangerously-skip-permissions
