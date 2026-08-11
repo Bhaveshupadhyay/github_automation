@@ -130,4 +130,4 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.AGY_API_KEY }}
           AGY_API_KEY: ${{ secrets.AGY_API_KEY }}
         run: |
-          uv run --project .. python -m automation.main || uv run --with google-genai --with pydantic --with graphify-cli python -m automation.main || python3 -m automation.main
+          uv run --project .. python -m automation.main || uv run --project .. --with google-genai --with pydantic --with graphify-cli python -m automation.main || python3 -m automation.main

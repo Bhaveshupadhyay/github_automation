@@ -25,7 +25,8 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         cmd = ["uv", "run", "--project", ".."] + args
         try:
             return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        except Exception:
+        except (FileNotFoundError, OSError):
+            logger.warning("⚠️ 'uv' executable not found. Falling back to direct binary execution.")
             return subprocess.run(args, capture_output=True, text=True, timeout=30)
 
     def execute_pipeline(self) -> None:
