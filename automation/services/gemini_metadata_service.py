@@ -1,13 +1,20 @@
 import os
 import re
-import json
-import urllib.request
 import subprocess
+from typing import Optional
+
 from automation.domain.models import GitPRDetails, WorkflowEnvironment
 from automation.interfaces.metadata_service_interface import IMetadataService
 
+try:
+    from google import genai
+    from google.genai import types
+    HAS_GENAI_SDK = True
+except ImportError:
+    HAS_GENAI_SDK = False
+
 class GeminiLLMMetadataService(IMetadataService):
-    """Concrete implementation of IMetadataService utilizing Gemini LLM API."""
+    """Concrete implementation of IMetadataService utilizing official google-genai SDK."""
     
     def __init__(self, config: WorkflowEnvironment):
         self.config = config
@@ -20,63 +27,39 @@ class GeminiLLMMetadataService(IMetadataService):
         api_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
         diff_summary = self._get_git_diff_summary()
         
-        if api_key:
+        # 1. Use Google's Official SDK if available and API key present
+        if HAS_GENAI_SDK and api_key:
             try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.model_name}:generateContent?key={api_key}"
+                client = genai.Client(api_key=api_key)
                 
                 system_instruction = (
                     "You are an expert Git Release Manager.\n"
                     "Your task: Generate semantic Git metadata for a Pull Request based on the user's prompt and git diff summary.\n"
-                    "Output JSON matching this exact schema:\n"
-                    "{\n"
-                    '  "branch_name": "feat/short-kebab-case-description",\n'
-                    '  "commit_message": "type(scope): concise description",\n'
-                    '  "pr_title": "type(scope): concise description",\n'
-                    '  "pr_body": "Detailed markdown description of changes..."\n'
-                    "}"
+                    "Follow Conventional Commit standard for commit_message and pr_title.\n"
+                    "Format branch_name as a short kebab-case string starting with feat/, fix/, or refactor/."
                 )
 
                 prompt_content = f"User Prompt: {self.config.user_prompt}\nGit Diff Summary:\n{diff_summary}"
 
-                payload = {
-                    "contents": [{
-                        "role": "user",
-                        "parts": [{"text": f"{system_instruction}\n\n{prompt_content}"}]
-                    }],
-                    "generationConfig": {
-                        "response_mime_type": "application/json"
-                    }
-                }
-
-                req = urllib.request.Request(
-                    url,
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json"}
+                response = client.models.generate_content(
+                    model=self.config.model_name,
+                    contents=prompt_content,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        response_schema=GitPRDetails
+                    )
                 )
 
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    res_data = json.loads(resp.read().decode("utf-8"))
-                    text = res_data["candidates"][0]["content"]["parts"][0]["text"]
-                    parsed = json.loads(text)
-
-                    raw_branch = parsed.get("branch_name", "feat/ai-patch")
-                    clean_branch = re.sub(r"[^a-zA-Z0-9_.-]", "-", raw_branch.lower())
-                    if not clean_branch.startswith("feat/") and not clean_branch.startswith("fix/") and not clean_branch.startswith("refactor/"):
-                        clean_branch = f"feat/{clean_branch}"
-
-                    print(f"🤖 Gemini LLM Branch Name: {clean_branch}")
-                    print(f"🤖 Gemini LLM Commit Title: {parsed.get('commit_message')}")
-
-                    return GitPRDetails(
-                        branch_name=clean_branch,
-                        commit_message=parsed.get("commit_message", f"feat: {self.config.user_prompt}"),
-                        pr_title=parsed.get("pr_title", f"feat: {self.config.user_prompt}"),
-                        pr_body=parsed.get("pr_body", f"Automated PR for: {self.config.user_prompt}")
-                    )
+                if response.parsed and isinstance(response.parsed, GitPRDetails):
+                    details: GitPRDetails = response.parsed
+                    print(f"🤖 google-genai SDK Generated Branch Name: {details.branch_name}")
+                    print(f"🤖 google-genai SDK Generated Commit Title: {details.commit_message}")
+                    return details
             except Exception as e:
-                print(f"⚠️ Gemini metadata service exception: {e}. Utilizing clean fallback formatting.")
+                print(f"⚠️ google-genai SDK call exception: {e}. Falling back to default formatting.")
 
-        # Failsafe fallback logic if no LLM key or offline
+        # 2. Failsafe fallback logic if SDK is missing or key is absent
         clean_slug = re.sub(r"[^a-z0-9]", "-", self.config.user_prompt.lower())
         clean_slug = re.sub(r"-+", "-", clean_slug).strip("-")[:35]
         timestamp = int(subprocess.check_output(["date", "+%s"]).decode().strip())

@@ -39,9 +39,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Pydantic & Graphify CLI
+      - name: Install Google GenAI SDK, Pydantic & Graphify CLI
         run: |
-          pip install pydantic graphify-cli || true
+          pip install google-genai pydantic graphify-cli || true
 
       - name: Install Antigravity CLI (agy)
         run: |
@@ -184,6 +184,7 @@ $GRAPH_CTX"
         if: env.CLARIFICATION_EXIT != 'true'
         working-directory: workspace_target
         env:
+          PYTHONPATH: ".."
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ steps.extract_vars.outputs.slack_channel }}
@@ -192,5 +193,7 @@ $GRAPH_CTX"
           USER_PROMPT: ${{ steps.extract_vars.outputs.user_prompt }}
           MODEL_NAME: ${{ steps.extract_vars.outputs.model }}
           EFFORT_VAL: ${{ steps.extract_vars.outputs.effort }}
+          GEMINI_API_KEY: ${{ secrets.AGY_API_KEY }}
+          AGY_API_KEY: ${{ secrets.AGY_API_KEY }}
         run: |
-          python3 ../scripts/post_process_pr.py
+          python3 -m automation.main
