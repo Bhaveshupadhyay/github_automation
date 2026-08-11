@@ -71,6 +71,7 @@ jobs:
           EFFORT_VAL="${{ github.event.inputs.effort }}"
           SLACK_CHAN="${{ github.event.inputs.slack_channel }}"
           SLACK_THREAD="${{ github.event.inputs.slack_thread_ts }}"
+          BRANCH_VAL="${{ github.event.client_payload.branch_name }}"
           
           if [ -z "$TARGET" ]; then
             TARGET="${{ github.event.client_payload.target_repo }}"
@@ -103,6 +104,7 @@ jobs:
           echo "effort=$EFFORT_VAL" >> $GITHUB_OUTPUT
           echo "slack_channel=$SLACK_CHAN" >> $GITHUB_OUTPUT
           echo "slack_thread_ts=$SLACK_THREAD" >> $GITHUB_OUTPUT
+          echo "existing_branch=$BRANCH_VAL" >> $GITHUB_OUTPUT
 
       - name: Clone Target Repository Workspace
         env:
@@ -181,7 +183,7 @@ $GRAPH_CTX"
             echo "CLARIFICATION_EXIT=true" >> $GITHUB_ENV
           fi
 
-      - name: Clean Up Rules/Skills, Create Branch, Open PR & Notify Slack
+      - name: Clean Up Rules/Skills, Create/Update Branch, Open/Update PR & Notify Slack
         if: env.CLARIFICATION_EXIT != 'true'
         working-directory: workspace_target
         env:
@@ -190,6 +192,7 @@ $GRAPH_CTX"
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ steps.extract_vars.outputs.slack_channel }}
           SLACK_THREAD: ${{ steps.extract_vars.outputs.slack_thread_ts }}
+          EXISTING_BRANCH: ${{ steps.extract_vars.outputs.existing_branch }}
           TARGET_REPO: ${{ steps.extract_vars.outputs.target_repo }}
           USER_PROMPT: ${{ steps.extract_vars.outputs.user_prompt }}
           MODEL_NAME: ${{ steps.extract_vars.outputs.model }}

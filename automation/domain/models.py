@@ -8,6 +8,7 @@ class WorkflowEnvironment(BaseModel):
     slack_token: Optional[str] = Field(default_factory=lambda: os.getenv("SLACK_TOKEN"))
     slack_channel: Optional[str] = Field(default_factory=lambda: os.getenv("SLACK_CHANNEL"))
     slack_thread_ts: Optional[str] = Field(default_factory=lambda: os.getenv("SLACK_THREAD"))
+    existing_branch: Optional[str] = Field(default_factory=lambda: os.getenv("EXISTING_BRANCH"))
     target_repo: str = Field(default_factory=lambda: os.getenv("TARGET_REPO", ""))
     user_prompt: str = Field(default_factory=lambda: os.getenv("USER_PROMPT", ""))
     model_name: str = Field(default_factory=lambda: os.getenv("MODEL_NAME", "gemini-3.5-flash-lite"))

@@ -23,11 +23,21 @@ class GeminiLLMMetadataService(IMetadataService):
         return res.stdout.strip()[:1000]
 
     def generate_metadata(self) -> GitPRDetails:
+        # 1. Thread Branch Continuity: If existing_branch or slack_thread_ts is present, reuse deterministic branch
+        thread_branch = None
+        if self.config.existing_branch:
+            thread_branch = self.config.existing_branch.strip()
+            logger.info(f"🔄 Reusing existing thread branch: {thread_branch}")
+        elif self.config.slack_thread_ts:
+            sanitized_ts = self.config.slack_thread_ts.replace(".", "-")
+            thread_branch = f"ai-thread-{sanitized_ts}"
+            logger.info(f"💬 Derived deterministic thread branch from slack_thread_ts: {thread_branch}")
+
         api_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
         diff_summary = self._get_git_diff_summary()
         
-        # Use Google's Official SDK for structured Pydantic response generation
-        if api_key:
+        # 2. Use Google's Official SDK for structured Pydantic response generation
+        if HAS_GENAI_SDK and api_key:
             try:
                 client = genai.Client(api_key=api_key)
                 
@@ -52,17 +62,26 @@ class GeminiLLMMetadataService(IMetadataService):
 
                 if response.parsed and isinstance(response.parsed, GitPRDetails):
                     details: GitPRDetails = response.parsed
+                    
+                    # Override branch_name with thread_branch if replying inside Slack thread
+                    if thread_branch:
+                        details.branch_name = thread_branch
+
                     logger.info(f"🤖 google-genai SDK Generated Branch Name: {details.branch_name}")
                     logger.info(f"🤖 google-genai SDK Generated Commit Title: {details.commit_message}")
                     return details
             except Exception as e:
                 logger.warning(f"⚠️ google-genai SDK call exception: {e}. Falling back to default formatting.")
 
-        # Failsafe fallback logic if key is absent
-        clean_slug = re.sub(r"[^a-z0-9]", "-", self.config.user_prompt.lower())
-        clean_slug = re.sub(r"-+", "-", clean_slug).strip("-")[:35]
-        timestamp = int(subprocess.check_output(["date", "+%s"]).decode().strip())
-        branch_name = f"feat/{clean_slug}-{timestamp}"
+        # 3. Failsafe fallback logic if key is absent
+        if not thread_branch:
+            clean_slug = re.sub(r"[^a-z0-9]", "-", self.config.user_prompt.lower())
+            clean_slug = re.sub(r"-+", "-", clean_slug).strip("-")[:35]
+            timestamp = int(subprocess.check_output(["date", "+%s"]).decode().strip())
+            branch_name = f"feat/{clean_slug}-{timestamp}"
+        else:
+            branch_name = thread_branch
+
         commit_msg = f"🤖 Antigravity AI Patch ({self.config.model_name}): {self.config.user_prompt}"
 
         return GitPRDetails(
