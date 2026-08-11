@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import logging
 import subprocess
 from typing import TYPE_CHECKING
@@ -12,6 +13,24 @@ if TYPE_CHECKING:
     from automation.dependency import Container
 
 logger = logging.getLogger("automation.code_dev")
+
+def extract_concise_question(text: str) -> str:
+    """Extracts a short, concise 1-sentence question from verbose CLI output text."""
+    if not text:
+        return "Could you please specify the details for your request?"
+    
+    # 1. Search for sentences ending with '?'
+    questions = re.findall(r"([^.!?\n]*\?)", text)
+    for q in questions:
+        q_clean = q.strip()
+        if len(q_clean) > 10 and not q_clean.startswith("[") and not q_clean.startswith("1."):
+            return q_clean
+            
+    # 2. Fallback to first clean line
+    lines = [l.strip() for l in text.split("\n") if l.strip() and not l.startswith("[") and not l.startswith("1.") and not l.startswith("2.")]
+    if lines:
+        return lines[0][:200]
+    return text[:200]
 
 class CodeDevelopmentService(ICodeDevelopmentService):
     """Dedicated service handling the end-to-end Code Development Pipeline."""
@@ -122,20 +141,18 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         git_service = self.container.get_git_pr_service(pr_details)
         if not git_service.has_changes():
             logger.info("ℹ️ No file changes were produced by the agent.")
-            # Filter CLI log noise and extract clean conversational response if available
-            clean_lines = [l.strip() for l in agy_output_lines if l.strip() and not l.startswith("[") and not l.startswith("2026-")]
-            clean_text = "\n".join(clean_lines)[:1000].strip()
+            # Extract short, concise 1-sentence question from agy output instead of verbose log dumps
+            concise_question = extract_concise_question(agy_full_output)
             
-            if clean_text:
-                logger.info("💬 Relaying agy conversational question to Slack thread...")
-                clarification_intent = TaskIntent(
-                    category=TaskCategory.CLARIFICATION_NEEDED,
-                    confidence=1.0,
-                    reasoning="agy CLI output conversational response without code changes.",
-                    clarification_question=clean_text
-                )
-                notifier = self.container.get_notification_service()
-                notifier.send_clarification_notification(clarification_intent)
+            logger.info(f"💬 Relaying concise clarification question to Slack thread: '{concise_question}'")
+            clarification_intent = TaskIntent(
+                category=TaskCategory.CLARIFICATION_NEEDED,
+                confidence=1.0,
+                reasoning="agy CLI output conversational response without code changes.",
+                clarification_question=concise_question
+            )
+            notifier = self.container.get_notification_service()
+            notifier.send_clarification_notification(clarification_intent)
             return
 
         git_service.create_and_push_branch()

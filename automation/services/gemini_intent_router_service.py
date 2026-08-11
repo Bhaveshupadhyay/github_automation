@@ -50,10 +50,10 @@ class GeminiIntentRouterService(IIntentRouterService):
             system_instruction = (
                 "You are an expert AI DevOps & Software Engineering Dispatcher.\n"
                 "Your task: Analyze the user's prompt and target repository context to classify intent into one of 3 categories:\n"
-                "1. CODE_DEVELOPMENT: User wants code changes, refactoring, new features, bug fixes, or test additions. Requires agy coding agent loop.\n"
+                "1. CODE_DEVELOPMENT: User wants specific code changes, refactoring, new features, bug fixes, or test additions. Requires agy coding agent loop.\n"
                 "2. DEPLOYMENT_DEVOPS: User wants operational deployment, release to App Store/Play Store, Cloudflare worker deployment, database migration, or server actions. No code editing required.\n"
-                "3. CLARIFICATION_NEEDED: User prompt lacks essential parameters (e.g. 'change the app name' without specifying the new name, or 'deploy app' when target environment is completely missing).\n\n"
-                "Provide high confidence score, concise reasoning, target_action if deployment, and clarification_question if missing details."
+                "3. CLARIFICATION_NEEDED: User asks to modify or set a property (e.g. 'change app name', 'update title', 'change logo', 'change redis to', 'deploy app') WITHOUT providing the specific target value or environment.\n\n"
+                "CRITICAL FORMATTING RULE: If classified as CLARIFICATION_NEEDED, clarification_question MUST be a short, direct, 1-sentence question asking specifically for the missing value (e.g. 'What would you like to change the app name to?'). Do NOT output file lists or technical explanations."
             )
 
             prompt_content = f"Target Repository: {self.config.target_repo}\nUser Prompt: {self.config.user_prompt}"
