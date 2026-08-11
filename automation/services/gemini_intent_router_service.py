@@ -72,7 +72,7 @@ class GeminiIntentRouterService(IIntentRouterService):
                     api_key=api_key,
                     http_options=types.HttpOptions(
                         headers={"X-goog-api-key": api_key},
-                        timeout=15.0
+                        timeout=15
                     )
                 )
 
