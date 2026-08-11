@@ -3,11 +3,11 @@ import re
 import json
 import urllib.request
 import subprocess
-from typing import Optional
 from automation.domain.models import GitPRDetails, WorkflowEnvironment
+from automation.interfaces.metadata_service_interface import IMetadataService
 
-class LLMMetadataService:
-    """Service responsible for using LLM (Gemini) to generate semantic branch names, conventional commits, and rich PR descriptions."""
+class GeminiLLMMetadataService(IMetadataService):
+    """Concrete implementation of IMetadataService utilizing Gemini LLM API."""
     
     def __init__(self, config: WorkflowEnvironment):
         self.config = config
@@ -20,7 +20,6 @@ class LLMMetadataService:
         api_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
         diff_summary = self._get_git_diff_summary()
         
-        # If API key is available, use Gemini LLM for structured semantic metadata generation
         if api_key:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.model_name}:generateContent?key={api_key}"
@@ -65,8 +64,8 @@ class LLMMetadataService:
                     if not clean_branch.startswith("feat/") and not clean_branch.startswith("fix/") and not clean_branch.startswith("refactor/"):
                         clean_branch = f"feat/{clean_branch}"
 
-                    print(f"🤖 LLM Generated Branch Name: {clean_branch}")
-                    print(f"🤖 LLM Generated Commit Title: {parsed.get('commit_message')}")
+                    print(f"🤖 Gemini LLM Branch Name: {clean_branch}")
+                    print(f"🤖 Gemini LLM Commit Title: {parsed.get('commit_message')}")
 
                     return GitPRDetails(
                         branch_name=clean_branch,
@@ -75,7 +74,7 @@ class LLMMetadataService:
                         pr_body=parsed.get("pr_body", f"Automated PR for: {self.config.user_prompt}")
                     )
             except Exception as e:
-                print(f"⚠️ LLM metadata generation failed or timed out: {e}. Falling back to default formatting.")
+                print(f"⚠️ Gemini metadata service exception: {e}. Utilizing clean fallback formatting.")
 
         # Failsafe fallback logic if no LLM key or offline
         clean_slug = re.sub(r"[^a-z0-9]", "-", self.config.user_prompt.lower())
