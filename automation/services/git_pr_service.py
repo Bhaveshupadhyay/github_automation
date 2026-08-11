@@ -1,6 +1,9 @@
+import logging
 import subprocess
 from typing import Optional
 from automation.domain.models import WorkflowEnvironment, GitPRDetails
+
+logger = logging.getLogger("automation.git_pr")
 
 class GitPRService:
     """Service responsible for executing Git commands and creating Pull Requests."""
@@ -14,8 +17,8 @@ class GitPRService:
         return bool(res.stdout.strip())
 
     def create_and_push_branch(self):
-        print(f"🌿 Creating Git Branch: {self.pr_details.branch_name}")
-        print(f"💬 Using Commit Message: {self.pr_details.commit_message}")
+        logger.info(f"🌿 Creating Git Branch: {self.pr_details.branch_name}")
+        logger.info(f"💬 Using Commit Message: {self.pr_details.commit_message}")
 
         subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
         subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
@@ -38,8 +41,8 @@ class GitPRService:
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode == 0:
             pr_url = res.stdout.strip()
-            print(f"🚀 Pull Request created: {pr_url}")
+            logger.info(f"🚀 Pull Request created: {pr_url}")
             return pr_url
         else:
-            print(f"❌ Failed to create PR: {res.stderr}")
+            logger.error(f"❌ Failed to create PR: {res.stderr}")
             return None

@@ -1,13 +1,16 @@
 import os
 import shutil
+import logging
 import subprocess
+
+logger = logging.getLogger("automation.cleanup")
 
 class WorkspaceCleanupService:
     """Service responsible for stripping temporary files so they are excluded from PR diffs."""
     
     @staticmethod
     def cleanup_unwanted_files():
-        print("🧹 Cleaning up injected .agents, rules, skills, and graphify files...")
+        logger.info("🧹 Cleaning up injected .agents, rules, skills, and graphify files...")
         unwanted_paths = [".agents", "graphify-out", "graphify_context.txt"]
         
         for path in unwanted_paths:

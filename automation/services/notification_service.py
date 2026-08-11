@@ -1,6 +1,9 @@
 import json
+import logging
 import urllib.request
 from automation.domain.models import WorkflowEnvironment, GitPRDetails
+
+logger = logging.getLogger("automation.notification")
 
 class NotificationService:
     """Service responsible for sending interactive notifications to Slack."""
@@ -11,7 +14,7 @@ class NotificationService:
 
     def send_slack_notification(self, pr_url: str):
         if not self.config.slack_token or not self.config.slack_channel:
-            print("ℹ️ Slack notification skipped (SLACK_TOKEN or SLACK_CHANNEL not set).")
+            logger.info("ℹ️ Slack notification skipped (SLACK_TOKEN or SLACK_CHANNEL not set).")
             return
 
         payload = {
@@ -41,8 +44,8 @@ class NotificationService:
             with urllib.request.urlopen(req) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
                 if result.get("ok"):
-                    print("✅ Slack notification posted successfully!")
+                    logger.info("✅ Slack notification posted successfully!")
                 else:
-                    print(f"⚠️ Slack API error: {result.get('error')}")
+                    logger.warning(f"⚠️ Slack API error: {result.get('error')}")
         except Exception as e:
-            print(f"❌ Error sending Slack notification: {e}")
+            logger.error(f"❌ Error sending Slack notification: {e}")

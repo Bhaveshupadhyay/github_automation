@@ -1,12 +1,20 @@
 import sys
+import logging
 from automation.dependency import container
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger("automation.main")
 
 def main():
     try:
         # Access application configuration
         _ = container.config
     except Exception as e:
-        print(f"❌ Invalid Environment Configuration: {e}")
+        logger.error(f"❌ Invalid Environment Configuration: {e}")
         sys.exit(1)
 
     # 1. Clean up workspace unwanted files
@@ -20,7 +28,7 @@ def main():
     # 3. Handle Git & PR creation
     git_service = container.get_git_pr_service(pr_details)
     if not git_service.has_changes():
-        print("ℹ️ No file changes were produced by the agent.")
+        logger.info("ℹ️ No file changes were produced by the agent.")
         return
 
     git_service.create_and_push_branch()

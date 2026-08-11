@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 import subprocess
 from typing import Optional
 
@@ -12,6 +13,8 @@ try:
     HAS_GENAI_SDK = True
 except ImportError:
     HAS_GENAI_SDK = False
+
+logger = logging.getLogger("automation.metadata")
 
 class GeminiLLMMetadataService(IMetadataService):
     """Concrete implementation of IMetadataService utilizing official google-genai SDK."""
@@ -53,11 +56,11 @@ class GeminiLLMMetadataService(IMetadataService):
 
                 if response.parsed and isinstance(response.parsed, GitPRDetails):
                     details: GitPRDetails = response.parsed
-                    print(f"🤖 google-genai SDK Generated Branch Name: {details.branch_name}")
-                    print(f"🤖 google-genai SDK Generated Commit Title: {details.commit_message}")
+                    logger.info(f"🤖 google-genai SDK Generated Branch Name: {details.branch_name}")
+                    logger.info(f"🤖 google-genai SDK Generated Commit Title: {details.commit_message}")
                     return details
             except Exception as e:
-                print(f"⚠️ google-genai SDK call exception: {e}. Falling back to default formatting.")
+                logger.warning(f"⚠️ google-genai SDK call exception: {e}. Falling back to default formatting.")
 
         # 2. Failsafe fallback logic if SDK is missing or key is absent
         clean_slug = re.sub(r"[^a-z0-9]", "-", self.config.user_prompt.lower())
