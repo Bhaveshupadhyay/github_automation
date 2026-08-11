@@ -9,13 +9,13 @@ from automation.interfaces.intent_router_interface import IIntentRouterService
 logger = logging.getLogger("automation.intent_router")
 
 def normalize_gemini_model(model_name: str) -> str:
-    """Normalizes agy CLI internal model strings (e.g. gemini-3.5-flash-lite) to valid Gemini API models."""
+    """Normalizes agy CLI internal model strings (e.g. gemini-3.5-flash-lite) to valid Gemini API models (e.g. gemini-3.1-flash-lite)."""
     model_lower = model_name.lower()
     if "pro" in model_lower:
         return "gemini-2.5-pro"
-    elif "flash" in model_lower:
-        return "gemini-2.5-flash"
-    return "gemini-2.5-flash"
+    elif "lite" in model_lower or "flash" in model_lower:
+        return "gemini-3.1-flash-lite"
+    return "gemini-3.1-flash-lite"
 
 class GeminiIntentRouterService(IIntentRouterService):
     """Concrete implementation of IIntentRouterService utilizing official google-genai SDK."""
