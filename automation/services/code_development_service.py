@@ -36,7 +36,17 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         cleanup_service = self.container.get_cleanup_service()
         cleanup_service.cleanup_unwanted_files()
 
-        # Step 2: Build & Query Graphify AST Knowledge Graph
+        # Step 2: Retrieve Full Slack Thread Conversation History if available
+        thread_history = ""
+        try:
+            history_service = self.container.get_slack_history_service()
+            fetched_history = history_service.fetch_thread_history()
+            if fetched_history:
+                thread_history = f"\n\n### Full Slack Conversation Thread History:\n{fetched_history}"
+        except Exception as e:
+            logger.debug(f"Slack history lookup skipped: {e}")
+
+        # Step 3: Build & Query Graphify AST Knowledge Graph
         logger.info("📊 Generating Graphify AST Knowledge Graph...")
         self._run_graphify(["graphify", "update", "."])
         
@@ -46,21 +56,23 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             graph_context = graph_res.stdout.strip()
             logger.info(f"🔍 Extracted Graphify AST Context ({len(graph_context)} chars).")
 
-        # Step 3: Inject Rules into workspace
+        # Step 4: Inject Rules into workspace
         rules_src = "../.agents/rules"
         rules_dst = ".agents/rules"
         if os.path.exists(rules_src):
             os.makedirs(rules_dst, exist_ok=True)
             subprocess.run(f"cp -r {rules_src}/* {rules_dst}/ 2>/dev/null || true", shell=True)
 
-        # Step 4: Stream Execution of Native Google Antigravity CLI (agy) Engine in Target Workspace
-        full_prompt = f"{self.config.user_prompt}\n\n### Mandatory Graphify AST Knowledge Context:\n{graph_context}"
-        logger.info(f"🤖 Executing Native Antigravity CLI (agy) with --add-dir . and effort: {self.config.effort_val}...")
+        # Step 5: Stream Execution of Native Google Antigravity CLI (agy) Engine with --print-timeout 15m0s
+        full_prompt = f"{self.config.user_prompt}{thread_history}\n\n### Mandatory Graphify AST Knowledge Context:\n{graph_context}"
+        logger.info(f"🤖 Executing Native Antigravity CLI (agy) with model {self.config.model_name}, --add-dir ., --print-timeout 15m0s...")
         
         cmd = [
             "agy", "--print", full_prompt,
             "--dangerously-skip-permissions",
             "--add-dir", ".",
+            "--model", self.config.model_name,
+            "--print-timeout", "15m0s",
             "--effort", self.config.effort_val
         ]
         
@@ -81,7 +93,7 @@ class CodeDevelopmentService(ICodeDevelopmentService):
 
         agy_full_output = "".join(agy_output_lines).strip()
 
-        # Step 5: Check for SpecialTags.CLARIFICATION_NEEDED tag in agy output
+        # Step 6: Check for SpecialTags.CLARIFICATION_NEEDED tag in agy output
         tag = SpecialTags.CLARIFICATION_NEEDED.value
         if tag in agy_full_output:
             question = agy_full_output.split(tag)[1].split("\n")[0].strip()
@@ -96,10 +108,10 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             notifier.send_clarification_notification(clarification_intent)
             return
 
-        # Step 6: Clean up injected files before git staging
+        # Step 7: Clean up injected files before git staging
         cleanup_service.cleanup_unwanted_files()
 
-        # Step 7: Resolve Gemini LLM Metadata Service & Git PR Service
+        # Step 8: Resolve Gemini LLM Metadata Service & Git PR Service
         metadata_service = self.container.get_metadata_service()
         pr_details = metadata_service.generate_metadata()
 
@@ -125,7 +137,7 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         git_service.create_and_push_branch()
         pr_url = git_service.create_pull_request()
 
-        # Step 8: Post Slack notification
+        # Step 9: Post Slack notification
         if pr_url:
             notifier = self.container.get_notification_service(pr_details)
             notifier.send_slack_notification(pr_url)
