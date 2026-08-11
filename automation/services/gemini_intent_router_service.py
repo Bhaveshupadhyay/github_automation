@@ -5,37 +5,11 @@ import urllib.request
 from google import genai
 from google.genai import types
 
-from automation.domain.constants import DEFAULT_GEMINI_MODEL
 from automation.domain.models import WorkflowEnvironment, TaskIntent, TaskCategory
 from automation.interfaces.intent_router_interface import IIntentRouterService
+from automation.utils.credentials import get_gemini_api_key, normalize_gemini_model
 
 logger = logging.getLogger("automation.intent_router")
-
-def get_gemini_api_key() -> str:
-    """Scans environment variables and local config for Gemini API key."""
-    env_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
-    if env_key:
-        logger.info(f"🔑 Gemini API Key detected from environment (Length: {len(env_key)} chars).")
-        return env_key
-    
-    creds_path = os.path.expanduser("~/.gemini/oauth_creds.json")
-    if os.path.exists(creds_path):
-        try:
-            with open(creds_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict) and "api_key" in data and data["api_key"]:
-                    key = data["api_key"]
-                    logger.info(f"🔑 Gemini API Key detected from ~/.gemini/oauth_creds.json (Length: {len(key)} chars).")
-                    return key
-        except Exception:
-            pass
-            
-    logger.info("ℹ️ No Gemini API Key detected in environment or local config files.")
-    return ""
-
-def normalize_gemini_model(model_name: str) -> str:
-    """Always returns gemini-3.1-flash-lite for Python SDK / REST calls."""
-    return DEFAULT_GEMINI_MODEL
 
 class GeminiIntentRouterService(IIntentRouterService):
     """Concrete implementation of IIntentRouterService utilizing official google-genai SDK and REST fallback."""
@@ -107,16 +81,20 @@ class GeminiIntentRouterService(IIntentRouterService):
 
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     res_data = json.loads(resp.read().decode("utf-8"))
-                    raw_text = res_data["candidates"][0]["content"]["parts"][0]["text"]
-                    parsed_json = json.loads(raw_text)
-                    if "category" not in parsed_json and "intent" in parsed_json:
-                        parsed_json["category"] = parsed_json["intent"]
-                    if "confidence" not in parsed_json:
-                        parsed_json["confidence"] = 1.0
-                    intent = TaskIntent(**parsed_json)
-                    logger.info(f"🎯 Classified Task Intent via REST API ({api_model}): {intent.category.value} (Confidence: {intent.confidence})")
-                    logger.info(f"💡 Reasoning: {intent.reasoning}")
-                    return intent
+                    candidates = res_data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            raw_text = parts[0].get("text", "").strip()
+                            parsed_json = json.loads(raw_text)
+                            if "category" not in parsed_json and "intent" in parsed_json:
+                                parsed_json["category"] = parsed_json["intent"]
+                            if "confidence" not in parsed_json:
+                                parsed_json["confidence"] = 1.0
+                            intent = TaskIntent(**parsed_json)
+                            logger.info(f"🎯 Classified Task Intent via REST API ({api_model}): {intent.category.value} (Confidence: {intent.confidence})")
+                            logger.info(f"💡 Reasoning: {intent.reasoning}")
+                            return intent
             except Exception as ex:
                 logger.warning(f"⚠️ Direct REST API call exception [{type(ex).__name__}]: {ex}. Defaulting to CODE_DEVELOPMENT pipeline.")
         

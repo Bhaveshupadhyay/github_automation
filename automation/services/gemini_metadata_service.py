@@ -13,7 +13,7 @@ from google.genai import types
 from automation.domain.models import GitPRDetails, WorkflowEnvironment
 from automation.domain.constants import SpecialTags
 from automation.interfaces.metadata_service_interface import IMetadataService
-from automation.services.gemini_intent_router_service import normalize_gemini_model, get_gemini_api_key
+from automation.utils.credentials import get_gemini_api_key, normalize_gemini_model
 
 logger = logging.getLogger("automation.metadata")
 
@@ -102,7 +102,7 @@ class GeminiLLMMetadataService(IMetadataService):
                     api_key=api_key,
                     http_options=types.HttpOptions(
                         headers={"X-goog-api-key": api_key},
-                        timeout=15
+                        timeout=15.0
                     )
                 )
                 logger.info(f"⚡ Requesting PR metadata via SDK from Gemini API model '{api_model}'...")
@@ -150,18 +150,22 @@ class GeminiLLMMetadataService(IMetadataService):
 
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     res_data = json.loads(resp.read().decode("utf-8"))
-                    raw_text = res_data["candidates"][0]["content"]["parts"][0]["text"]
-                    parsed_json = json.loads(raw_text)
-                    details = GitPRDetails(**parsed_json)
+                    candidates = res_data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            raw_text = parts[0].get("text", "").strip()
+                            parsed_json = json.loads(raw_text)
+                            details = GitPRDetails(**parsed_json)
 
-                    if semantic_branch:
-                        details.branch_name = semantic_branch
-                    if self.config.slack_thread_ts and "slack_thread:" not in details.pr_body:
-                        details.pr_body += f"\n\n<!-- slack_thread: {self.config.slack_thread_ts} -->"
+                            if semantic_branch:
+                                details.branch_name = semantic_branch
+                            if self.config.slack_thread_ts and "slack_thread:" not in details.pr_body:
+                                details.pr_body += f"\n\n<!-- slack_thread: {self.config.slack_thread_ts} -->"
 
-                    logger.info(f"🤖 Gemini LLM Generated Semantic Branch Name via REST API: {details.branch_name}")
-                    logger.info(f"🤖 Gemini LLM Generated Commit Title: {details.commit_message}")
-                    return details
+                            logger.info(f"🤖 Gemini LLM Generated Semantic Branch Name via REST API: {details.branch_name}")
+                            logger.info(f"🤖 Gemini LLM Generated Commit Title: {details.commit_message}")
+                            return details
             except Exception as ex:
                 logger.warning(f"⚠️ Direct REST API metadata exception [{type(ex).__name__}]: {ex}. Falling back to default formatting.")
 
