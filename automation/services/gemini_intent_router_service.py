@@ -8,6 +8,10 @@ from automation.interfaces.intent_router_interface import IIntentRouterService
 
 logger = logging.getLogger("automation.intent_router")
 
+def normalize_gemini_model(model_name: str) -> str:
+    """Always returns gemini-3.1-flash-lite for official google-genai SDK calls."""
+    return "gemini-3.1-flash-lite"
+
 class GeminiIntentRouterService(IIntentRouterService):
     """Concrete implementation of IIntentRouterService utilizing official google-genai SDK."""
     
@@ -36,7 +40,7 @@ class GeminiIntentRouterService(IIntentRouterService):
                 prompt_content = f"Target Repository: {self.config.target_repo}\nUser Prompt: {self.config.user_prompt}"
 
                 response = client.models.generate_content(
-                    model=self.config.model_name,
+                    model="gemini-3.1-flash-lite",
                     contents=prompt_content,
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
