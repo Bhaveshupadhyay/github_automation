@@ -20,6 +20,15 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         self.container = container
         self.config = container.config
 
+    def _run_graphify(self, args: list) -> subprocess.CompletedProcess:
+        """Helper executing graphify CLI via uv root project virtualenv or global binary."""
+        cmd = ["uv", "run", "--project", ".."] + args
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except (FileNotFoundError, OSError):
+            logger.warning("⚠️ 'uv' executable not found. Falling back to direct binary execution.")
+            return subprocess.run(args, capture_output=True, text=True, timeout=30)
+
     def execute_pipeline(self) -> None:
         logger.info("🛠️ Executing Code Development Pipeline (Graphify AST + agy Engine + Git Branch & PR)...")
 
@@ -29,10 +38,10 @@ class CodeDevelopmentService(ICodeDevelopmentService):
 
         # Step 2: Build & Query Graphify AST Knowledge Graph
         logger.info("📊 Generating Graphify AST Knowledge Graph...")
-        subprocess.run(["graphify", "update", "."], capture_output=True, text=True, timeout=30)
+        self._run_graphify(["graphify", "update", "."])
         
         graph_context = ""
-        graph_res = subprocess.run(["graphify", "query", self.config.user_prompt], capture_output=True, text=True, timeout=30)
+        graph_res = self._run_graphify(["graphify", "query", self.config.user_prompt])
         if graph_res.returncode == 0 and graph_res.stdout.strip():
             graph_context = graph_res.stdout.strip()
             logger.info(f"🔍 Extracted Graphify AST Context ({len(graph_context)} chars).")
