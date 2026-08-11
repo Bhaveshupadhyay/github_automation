@@ -63,49 +63,34 @@ jobs:
             echo "$AGY_AUTH_CONFIG" | tr -d '\r\n ' | base64 -d > ~/.gemini/oauth_creds.json || true
           fi
 
-      - name: Extract Target Repo, Prompt, Model, Effort & Slack Identifiers
+      - name: Run Python Pre-Flight Target Resolution
+        id: preflight
+        env:
+          USER_PROMPT: ${{ github.event.inputs.user_prompt || github.event.client_payload.user_prompt }}
+          INPUT_TARGET: ${{ github.event.inputs.target_repo }}
+          PAYLOAD_TARGET: ${{ github.event.client_payload.target_repo }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          uv run python -m automation.preflight
+
+      - name: Extract Workflow Variables
         id: extract_vars
         env:
-          INPUT_TARGET: ${{ github.event.inputs.target_repo }}
           INPUT_PROMPT: ${{ github.event.inputs.user_prompt }}
           INPUT_MODEL: ${{ github.event.inputs.model }}
           INPUT_EFFORT: ${{ github.event.inputs.effort }}
           INPUT_SLACK_CHAN: ${{ github.event.inputs.slack_channel }}
           INPUT_SLACK_THREAD: ${{ github.event.inputs.slack_thread_ts }}
-          PAYLOAD_TARGET: ${{ github.event.client_payload.target_repo }}
           PAYLOAD_PROMPT: ${{ github.event.client_payload.user_prompt }}
           PAYLOAD_MODEL: ${{ github.event.client_payload.model }}
           PAYLOAD_EFFORT: ${{ github.event.client_payload.effort }}
           PAYLOAD_SLACK_CHAN: ${{ github.event.client_payload.slack_channel }}
           PAYLOAD_SLACK_THREAD: ${{ github.event.client_payload.slack_thread_ts }}
           PAYLOAD_BRANCH: ${{ github.event.client_payload.branch_name }}
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          RESOLVED_TARGET: ${{ steps.preflight.outputs.target_repo }}
         run: |
-          TARGET="$INPUT_TARGET"
-          if [ -z "$TARGET" ]; then TARGET="$PAYLOAD_TARGET"; fi
-
           PROMPT="$INPUT_PROMPT"
           if [ -z "$PROMPT" ]; then PROMPT="$PAYLOAD_PROMPT"; fi
-
-          # Dynamically extract owner/repo slug from user prompt if TARGET is empty and validate via GitHub API
-          if [ -z "$TARGET" ] && [ -n "$PROMPT" ]; then
-            CLEAN_PROMPT=$(echo "$PROMPT" | sed -E 's#https?://[^\s]+##g' | sed -E 's#github\.com/[^\s]+##g')
-            CANDIDATES=$(echo "$CLEAN_PROMPT" | grep -oE '[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+' || true)
-            for candidate in $CANDIDATES; do
-              if [ "$candidate" = "Original/Request" ] || [ "$candidate" = "Original/Prompt" ]; then continue; fi
-              if [ -n "$GITHUB_TOKEN" ]; then
-                if curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/$candidate" >/dev/null 2>&1; then
-                  echo "🎯 Extracted and validated Target Repo '$candidate' from prompt in workflow bash step."
-                  TARGET="$candidate"
-                  break
-                fi
-              else
-                echo "🎯 Extracted Target Repo '$candidate' from prompt."
-                TARGET="$candidate"
-                break
-              fi
-            done
-          fi
 
           MODEL_NAME="$INPUT_MODEL"
           if [ -z "$MODEL_NAME" ]; then MODEL_NAME="$PAYLOAD_MODEL"; fi
@@ -121,7 +106,7 @@ jobs:
           SLACK_THREAD="$INPUT_SLACK_THREAD"
           if [ -z "$SLACK_THREAD" ]; then SLACK_THREAD="$PAYLOAD_SLACK_THREAD"; fi
 
-          echo "target_repo=$TARGET" >> $GITHUB_OUTPUT
+          echo "target_repo=$RESOLVED_TARGET" >> $GITHUB_OUTPUT
           echo "user_prompt=$PROMPT" >> $GITHUB_OUTPUT
           echo "model=$MODEL_NAME" >> $GITHUB_OUTPUT
           echo "effort=$EFFORT_VAL" >> $GITHUB_OUTPUT
