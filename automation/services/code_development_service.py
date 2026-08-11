@@ -63,8 +63,9 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             os.makedirs(rules_dst, exist_ok=True)
             subprocess.run(f"cp -r {rules_src}/* {rules_dst}/ 2>/dev/null || true", shell=True)
 
-        # Step 5: Stream Execution of Native Google Antigravity CLI (agy) Engine with gemini-3.6-flash & --effort high
-        full_prompt = f"{self.config.user_prompt}{thread_history}\n\n### Mandatory Graphify AST Knowledge Context:\n{graph_context}"
+        # Step 5: Stream Execution of Native Google Antigravity CLI (agy) Engine in Current Directory '.'
+        workspace_rule = "\n\nCRITICAL WORKSPACE RULE: You MUST modify and edit existing files ONLY inside the current working directory ('.'). Never create new subfolders in ~/.gemini/antigravity-cli/scratch or any external directory."
+        full_prompt = f"{self.config.user_prompt}{thread_history}{workspace_rule}\n\n### Mandatory Graphify AST Knowledge Context:\n{graph_context}"
         agy_model = DEFAULT_AGY_MODEL
         effort_val = self.config.effort_val if self.config.effort_val else "high"
         

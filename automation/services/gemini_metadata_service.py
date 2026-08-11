@@ -3,6 +3,7 @@ import re
 import time
 import json
 import logging
+import urllib.request
 import subprocess
 from typing import Optional
 
@@ -17,7 +18,7 @@ from automation.services.gemini_intent_router_service import normalize_gemini_mo
 logger = logging.getLogger("automation.metadata")
 
 class GeminiLLMMetadataService(IMetadataService):
-    """Concrete implementation of IMetadataService utilizing official google-genai SDK.
+    """Concrete implementation of IMetadataService utilizing official google-genai SDK and REST fallback.
     Parses AGY_EXECUTION_SUMMARY output by agy engine and generates semantic branch, commit title, and PR description.
     """
     
@@ -80,28 +81,31 @@ class GeminiLLMMetadataService(IMetadataService):
         api_key = get_gemini_api_key()
         execution_summary = self._extract_agy_execution_summary()
         
+        system_instruction = (
+            "You are an expert Git Release Manager.\n"
+            "Your task: Generate semantic Git metadata for a Pull Request based on the user's prompt and AGY Execution Summary.\n"
+            "Follow Conventional Commit standard for commit_message and pr_title (e.g. feat(scope): description).\n"
+            "Format branch_name as a short semantic kebab-case string starting with feat/, fix/, or refactor/ (e.g. feat/add-redis-caching-trending-posts).\n"
+            "Format pr_body as a rich Markdown document detailing key changes, affected files, and verification steps."
+        )
+
+        prompt_content = (
+            f"User Prompt: {self.config.user_prompt}\n\n"
+            f"AGY Execution Summary:\n{execution_summary}"
+        )
+        api_model = normalize_gemini_model(self.config.model_name)
+
         # 2. Use Google's Official SDK for structured Pydantic response generation
         if api_key:
             try:
                 client = genai.Client(
                     api_key=api_key,
-                    http_options=types.HttpOptions(timeout=45)
+                    http_options=types.HttpOptions(
+                        headers={"X-goog-api-key": api_key},
+                        timeout=15
+                    )
                 )
-                
-                system_instruction = (
-                    "You are an expert Git Release Manager.\n"
-                    "Your task: Generate semantic Git metadata for a Pull Request based on the user's prompt and AGY Execution Summary.\n"
-                    "Follow Conventional Commit standard for commit_message and pr_title (e.g. feat(scope): description).\n"
-                    "Format branch_name as a short semantic kebab-case string starting with feat/, fix/, or refactor/ (e.g. feat/add-redis-caching-trending-posts).\n"
-                    "Format pr_body as a rich Markdown document detailing key changes, affected files, and verification steps."
-                )
-
-                prompt_content = (
-                    f"User Prompt: {self.config.user_prompt}\n\n"
-                    f"AGY Execution Summary:\n{execution_summary}"
-                )
-                api_model = normalize_gemini_model(self.config.model_name)
-                logger.info(f"⚡ Requesting PR metadata from Gemini API model '{api_model}'...")
+                logger.info(f"⚡ Requesting PR metadata via SDK from Gemini API model '{api_model}'...")
 
                 response = client.models.generate_content(
                     model=api_model,
@@ -115,22 +119,53 @@ class GeminiLLMMetadataService(IMetadataService):
 
                 if response.parsed and isinstance(response.parsed, GitPRDetails):
                     details: GitPRDetails = response.parsed
-                    
-                    # If thread already has an existing semantic branch, preserve it
                     if semantic_branch:
                         details.branch_name = semantic_branch
-
-                    # Embed invisible Slack thread tracking metadata in PR body for future turn lookups
                     if self.config.slack_thread_ts and "slack_thread:" not in details.pr_body:
                         details.pr_body += f"\n\n<!-- slack_thread: {self.config.slack_thread_ts} -->"
 
-                    logger.info(f"🤖 Gemini LLM Generated Semantic Branch Name: {details.branch_name}")
+                    logger.info(f"🤖 Gemini LLM Generated Semantic Branch Name via SDK: {details.branch_name}")
                     logger.info(f"🤖 Gemini LLM Generated Commit Title: {details.commit_message}")
                     return details
             except Exception as e:
-                logger.warning(f"⚠️ google-genai SDK call exception [{type(e).__name__}]: {e}. Falling back to default formatting.")
+                logger.warning(f"⚠️ google-genai SDK call exception [{type(e).__name__}]: {e}. Trying direct REST API fallback...")
 
-        # 3. Failsafe fallback logic if SDK is missing or key is absent
+            # 3. Direct HTTP REST API Fallback with X-goog-api-key header
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{api_model}:generateContent"
+                payload = {
+                    "system_instruction": {"parts": [{"text": system_instruction}]},
+                    "contents": [{"parts": [{"text": prompt_content}]}],
+                    "generationConfig": {"response_mime_type": "application/json"}
+                }
+
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-goog-api-key": api_key
+                    }
+                )
+
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    res_data = json.loads(resp.read().decode("utf-8"))
+                    raw_text = res_data["candidates"][0]["content"]["parts"][0]["text"]
+                    parsed_json = json.loads(raw_text)
+                    details = GitPRDetails(**parsed_json)
+
+                    if semantic_branch:
+                        details.branch_name = semantic_branch
+                    if self.config.slack_thread_ts and "slack_thread:" not in details.pr_body:
+                        details.pr_body += f"\n\n<!-- slack_thread: {self.config.slack_thread_ts} -->"
+
+                    logger.info(f"🤖 Gemini LLM Generated Semantic Branch Name via REST API: {details.branch_name}")
+                    logger.info(f"🤖 Gemini LLM Generated Commit Title: {details.commit_message}")
+                    return details
+            except Exception as ex:
+                logger.warning(f"⚠️ Direct REST API metadata exception [{type(ex).__name__}]: {ex}. Falling back to default formatting.")
+
+        # 4. Failsafe fallback logic if SDK is missing or key is absent
         if not semantic_branch:
             clean_slug = re.sub(r"[^a-z0-9]", "-", self.config.user_prompt.lower())
             clean_slug = re.sub(r"-+", "-", clean_slug).strip("-")[:35]
