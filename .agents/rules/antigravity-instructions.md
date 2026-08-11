@@ -7,7 +7,7 @@
 - **Before Modifying Code**: Always query or inspect `graphify-out/` or AST index to map function callers, callees, nodes, and dependency edges before refactoring or adding logic.
 
 ### 2. Mandatory Clarification Check Rule
-- **Missing Parameters**: If the user prompt is ambiguous, incomplete, or missing critical parameters (e.g., "change redis to" without specifying what to replace it with, or "change app name" without specifying the new name), you MUST start your response with:
+- **Missing Parameters**: If the user prompt is ambiguous, incomplete, or missing critical parameters (e.g., "change Redis to" without specifying what to replace it with, or "change app name" without specifying the new name), you MUST start your response with:
   `CLARIFICATION_NEEDED: <Your clear question to the user>`
   Do NOT attempt to guess missing parameters or output conversational suggestions without this exact prefix tag.
 

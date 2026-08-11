@@ -71,7 +71,8 @@ class CodeDevelopmentService(ICodeDevelopmentService):
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 log_file.write(line)
-                agy_output_lines.append(line)
+                if len(agy_output_lines) < 200:
+                    agy_output_lines.append(line)
             proc.wait()
 
         if proc.returncode != 0:
@@ -105,14 +106,17 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         git_service = self.container.get_git_pr_service(pr_details)
         if not git_service.has_changes():
             logger.info("ℹ️ No file changes were produced by the agent.")
-            # If agy responded conversationally without code changes, relay clarification to Slack!
-            if agy_full_output:
-                logger.info("💬 Relaying agy response text to Slack thread...")
+            # Filter CLI log noise and extract clean conversational response if available
+            clean_lines = [l.strip() for l in agy_output_lines if l.strip() and not l.startswith("[") and not l.startswith("2026-")]
+            clean_text = "\n".join(clean_lines)[:1000].strip()
+            
+            if clean_text:
+                logger.info("💬 Relaying agy conversational question to Slack thread...")
                 clarification_intent = TaskIntent(
                     category=TaskCategory.CLARIFICATION_NEEDED,
                     confidence=1.0,
                     reasoning="agy CLI output conversational response without code changes.",
-                    clarification_question=agy_full_output[:1000]
+                    clarification_question=clean_text
                 )
                 notifier = self.container.get_notification_service()
                 notifier.send_clarification_notification(clarification_intent)
