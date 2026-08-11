@@ -65,39 +65,40 @@ jobs:
 
       - name: Extract Target Repo, Prompt, Model, Effort & Slack Identifiers
         id: extract_vars
+        env:
+          INPUT_TARGET: ${{ github.event.inputs.target_repo }}
+          INPUT_PROMPT: ${{ github.event.inputs.user_prompt }}
+          INPUT_MODEL: ${{ github.event.inputs.model }}
+          INPUT_EFFORT: ${{ github.event.inputs.effort }}
+          INPUT_SLACK_CHAN: ${{ github.event.inputs.slack_channel }}
+          INPUT_SLACK_THREAD: ${{ github.event.inputs.slack_thread_ts }}
+          PAYLOAD_TARGET: ${{ github.event.client_payload.target_repo }}
+          PAYLOAD_PROMPT: ${{ github.event.client_payload.user_prompt }}
+          PAYLOAD_MODEL: ${{ github.event.client_payload.model }}
+          PAYLOAD_EFFORT: ${{ github.event.client_payload.effort }}
+          PAYLOAD_SLACK_CHAN: ${{ github.event.client_payload.slack_channel }}
+          PAYLOAD_SLACK_THREAD: ${{ github.event.client_payload.slack_thread_ts }}
+          PAYLOAD_BRANCH: ${{ github.event.client_payload.branch_name }}
         run: |
-          TARGET="${{ github.event.inputs.target_repo }}"
-          PROMPT="${{ github.event.inputs.user_prompt }}"
-          MODEL_NAME="${{ github.event.inputs.model }}"
-          EFFORT_VAL="${{ github.event.inputs.effort }}"
-          SLACK_CHAN="${{ github.event.inputs.slack_channel }}"
-          SLACK_THREAD="${{ github.event.inputs.slack_thread_ts }}"
-          BRANCH_VAL="${{ github.event.client_payload.branch_name }}"
-          
-          if [ -z "$TARGET" ]; then
-            TARGET="${{ github.event.client_payload.target_repo }}"
-          fi
-          if [ -z "$PROMPT" ]; then
-            PROMPT="${{ github.event.client_payload.user_prompt }}"
-          fi
-          if [ -z "$MODEL_NAME" ]; then
-            MODEL_NAME="${{ github.event.client_payload.model }}"
-          fi
-          if [ -z "$MODEL_NAME" ]; then
-            MODEL_NAME="gemini-3.5-flash-lite"
-          fi
-          if [ -z "$EFFORT_VAL" ]; then
-            EFFORT_VAL="${{ github.event.client_payload.effort }}"
-          fi
-          if [ -z "$EFFORT_VAL" ]; then
-            EFFORT_VAL="high"
-          fi
-          if [ -z "$SLACK_CHAN" ]; then
-            SLACK_CHAN="${{ github.event.client_payload.slack_channel }}"
-          fi
-          if [ -z "$SLACK_THREAD" ]; then
-            SLACK_THREAD="${{ github.event.client_payload.slack_thread_ts }}"
-          fi
+          TARGET="$INPUT_TARGET"
+          if [ -z "$TARGET" ]; then TARGET="$PAYLOAD_TARGET"; fi
+
+          PROMPT="$INPUT_PROMPT"
+          if [ -z "$PROMPT" ]; then PROMPT="$PAYLOAD_PROMPT"; fi
+
+          MODEL_NAME="$INPUT_MODEL"
+          if [ -z "$MODEL_NAME" ]; then MODEL_NAME="$PAYLOAD_MODEL"; fi
+          if [ -z "$MODEL_NAME" ]; then MODEL_NAME="gemini-3.5-flash-lite"; fi
+
+          EFFORT_VAL="$INPUT_EFFORT"
+          if [ -z "$EFFORT_VAL" ]; then EFFORT_VAL="$PAYLOAD_EFFORT"; fi
+          if [ -z "$EFFORT_VAL" ]; then EFFORT_VAL="high"; fi
+
+          SLACK_CHAN="$INPUT_SLACK_CHAN"
+          if [ -z "$SLACK_CHAN" ]; then SLACK_CHAN="$PAYLOAD_SLACK_CHAN"; fi
+
+          SLACK_THREAD="$INPUT_SLACK_THREAD"
+          if [ -z "$SLACK_THREAD" ]; then SLACK_THREAD="$PAYLOAD_SLACK_THREAD"; fi
 
           echo "target_repo=$TARGET" >> $GITHUB_OUTPUT
           echo "user_prompt=$PROMPT" >> $GITHUB_OUTPUT
@@ -105,7 +106,7 @@ jobs:
           echo "effort=$EFFORT_VAL" >> $GITHUB_OUTPUT
           echo "slack_channel=$SLACK_CHAN" >> $GITHUB_OUTPUT
           echo "slack_thread_ts=$SLACK_THREAD" >> $GITHUB_OUTPUT
-          echo "existing_branch=$BRANCH_VAL" >> $GITHUB_OUTPUT
+          echo "existing_branch=$PAYLOAD_BRANCH" >> $GITHUB_OUTPUT
 
       - name: Clone Target Repository Workspace
         env:
