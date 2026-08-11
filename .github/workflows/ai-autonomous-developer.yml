@@ -86,6 +86,15 @@ jobs:
           PROMPT="$INPUT_PROMPT"
           if [ -z "$PROMPT" ]; then PROMPT="$PAYLOAD_PROMPT"; fi
 
+          # Dynamically extract owner/repo slug from user prompt if TARGET is empty
+          if [ -z "$TARGET" ] && [ -n "$PROMPT" ]; then
+            EXTRACTED_REPO=$(echo "$PROMPT" | grep -oE '[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+' | grep -v 'Original/Request' | head -n 1 || true)
+            if [ -n "$EXTRACTED_REPO" ]; then
+              echo "🎯 Extracted Target Repo '$EXTRACTED_REPO' from prompt in workflow bash step."
+              TARGET="$EXTRACTED_REPO"
+            fi
+          fi
+
           MODEL_NAME="$INPUT_MODEL"
           if [ -z "$MODEL_NAME" ]; then MODEL_NAME="$PAYLOAD_MODEL"; fi
           if [ -z "$MODEL_NAME" ]; then MODEL_NAME="gemini-3.1-flash-lite"; fi
@@ -113,8 +122,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           TARGET_REPO="${{ steps.extract_vars.outputs.target_repo }}"
-          echo "Cloning $TARGET_REPO..."
-          git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git workspace_target
+          if [ -n "$TARGET_REPO" ]; then
+            echo "Cloning $TARGET_REPO..."
+            git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git workspace_target
+          else
+            echo "⚠️ No target repository specified. Creating empty workspace directory for intent router clarification..."
+            mkdir -p workspace_target
+          fi
 
       - name: Run Master AI Orchestrator (Intent Router + Task Dispatcher)
         working-directory: workspace_target
