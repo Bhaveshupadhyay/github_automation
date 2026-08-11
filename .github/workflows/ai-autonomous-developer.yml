@@ -79,6 +79,7 @@ jobs:
           PAYLOAD_SLACK_CHAN: ${{ github.event.client_payload.slack_channel }}
           PAYLOAD_SLACK_THREAD: ${{ github.event.client_payload.slack_thread_ts }}
           PAYLOAD_BRANCH: ${{ github.event.client_payload.branch_name }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           TARGET="$INPUT_TARGET"
           if [ -z "$TARGET" ]; then TARGET="$PAYLOAD_TARGET"; fi
@@ -86,13 +87,24 @@ jobs:
           PROMPT="$INPUT_PROMPT"
           if [ -z "$PROMPT" ]; then PROMPT="$PAYLOAD_PROMPT"; fi
 
-          # Dynamically extract owner/repo slug from user prompt if TARGET is empty
+          # Dynamically extract owner/repo slug from user prompt if TARGET is empty and validate via GitHub API
           if [ -z "$TARGET" ] && [ -n "$PROMPT" ]; then
-            EXTRACTED_REPO=$(echo "$PROMPT" | grep -oE '[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+' | grep -v 'Original/Request' | head -n 1 || true)
-            if [ -n "$EXTRACTED_REPO" ]; then
-              echo "🎯 Extracted Target Repo '$EXTRACTED_REPO' from prompt in workflow bash step."
-              TARGET="$EXTRACTED_REPO"
-            fi
+            CLEAN_PROMPT=$(echo "$PROMPT" | sed -E 's#https?://[^\s]+##g' | sed -E 's#github\.com/[^\s]+##g')
+            CANDIDATES=$(echo "$CLEAN_PROMPT" | grep -oE '[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+' || true)
+            for candidate in $CANDIDATES; do
+              if [ "$candidate" = "Original/Request" ] || [ "$candidate" = "Original/Prompt" ]; then continue; fi
+              if [ -n "$GITHUB_TOKEN" ]; then
+                if curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/$candidate" >/dev/null 2>&1; then
+                  echo "🎯 Extracted and validated Target Repo '$candidate' from prompt in workflow bash step."
+                  TARGET="$candidate"
+                  break
+                fi
+              else
+                echo "🎯 Extracted Target Repo '$candidate' from prompt."
+                TARGET="$candidate"
+                break
+              fi
+            done
           fi
 
           MODEL_NAME="$INPUT_MODEL"
