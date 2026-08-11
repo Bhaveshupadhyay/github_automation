@@ -6,10 +6,10 @@
 - **Graphify Awareness**: The repository has a `graphify-out/` AST knowledge graph.
 - **Before Modifying Code**: Always query or inspect `graphify-out/` or AST index to map function callers, callees, nodes, and dependency edges before refactoring or adding logic.
 
-### 2. Clarification Check Rule
-- **Missing Parameters**: If the user prompt is ambiguous or missing critical required information (e.g., "Change app name" without specifying the new name), output:
+### 2. Mandatory Clarification Check Rule
+- **Missing Parameters**: If the user prompt is ambiguous, incomplete, or missing critical parameters (e.g., "change redis to" without specifying what to replace it with, or "change app name" without specifying the new name), you MUST start your response with:
   `CLARIFICATION_NEEDED: <Your clear question to the user>`
-  Do NOT attempt to guess missing parameters or invent placeholder code.
+  Do NOT attempt to guess missing parameters or output conversational suggestions without this exact prefix tag.
 
 ### 3. Pure Engineering Focus & Structured Execution Summary
 - **Code Execution Only**: Focus 100% on software engineering, file editing, and test implementation. Do NOT execute `git` or `gh` CLI commands.

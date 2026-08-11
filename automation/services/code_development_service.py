@@ -64,35 +64,36 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             "--effort", self.config.effort_val
         ]
         
+        agy_output_lines = []
         with open(self.config.execution_log_path, "w", encoding="utf-8") as log_file:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             for line in proc.stdout:
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 log_file.write(line)
+                agy_output_lines.append(line)
             proc.wait()
 
         if proc.returncode != 0:
             logger.error(f"❌ agy engine execution failed with exit code {proc.returncode}. Aborting PR pipeline.")
             return
 
+        agy_full_output = "".join(agy_output_lines).strip()
+
         # Step 5: Check for SpecialTags.CLARIFICATION_NEEDED tag in agy output
         tag = SpecialTags.CLARIFICATION_NEEDED.value
-        if os.path.exists(self.config.execution_log_path):
-            with open(self.config.execution_log_path, "r", encoding="utf-8", errors="ignore") as f:
-                log_content = f.read()
-                if tag in log_content:
-                    question = log_content.split(tag)[1].split("\n")[0].strip()
-                    logger.info(f"❓ agy requested clarification: {question}")
-                    clarification_intent = TaskIntent(
-                        category=TaskCategory.CLARIFICATION_NEEDED,
-                        confidence=1.0,
-                        reasoning="Clarification requested by agy CLI engine.",
-                        clarification_question=question
-                    )
-                    notifier = self.container.get_notification_service()
-                    notifier.send_clarification_notification(clarification_intent)
-                    return
+        if tag in agy_full_output:
+            question = agy_full_output.split(tag)[1].split("\n")[0].strip()
+            logger.info(f"❓ agy requested clarification: {question}")
+            clarification_intent = TaskIntent(
+                category=TaskCategory.CLARIFICATION_NEEDED,
+                confidence=1.0,
+                reasoning="Clarification requested by agy CLI engine.",
+                clarification_question=question
+            )
+            notifier = self.container.get_notification_service()
+            notifier.send_clarification_notification(clarification_intent)
+            return
 
         # Step 6: Clean up injected files before git staging
         cleanup_service.cleanup_unwanted_files()
@@ -104,6 +105,17 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         git_service = self.container.get_git_pr_service(pr_details)
         if not git_service.has_changes():
             logger.info("ℹ️ No file changes were produced by the agent.")
+            # If agy responded conversationally without code changes, relay clarification to Slack!
+            if agy_full_output:
+                logger.info("💬 Relaying agy response text to Slack thread...")
+                clarification_intent = TaskIntent(
+                    category=TaskCategory.CLARIFICATION_NEEDED,
+                    confidence=1.0,
+                    reasoning="agy CLI output conversational response without code changes.",
+                    clarification_question=agy_full_output[:1000]
+                )
+                notifier = self.container.get_notification_service()
+                notifier.send_clarification_notification(clarification_intent)
             return
 
         git_service.create_and_push_branch()
