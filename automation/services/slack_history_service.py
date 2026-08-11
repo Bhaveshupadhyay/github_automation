@@ -13,7 +13,7 @@ class SlackHistoryService:
         self.config = config
 
     def fetch_thread_history(self) -> Optional[str]:
-        """Fetches all messages in the Slack thread associated with slack_thread_ts."""
+        """Fetches all messages in the Slack thread associated with slack_thread_ts and formats them as standard User / Assistant dialogue."""
         token = self.config.slack_token
         channel = self.config.slack_channel
         thread_ts = self.config.slack_thread_ts
@@ -36,13 +36,21 @@ class SlackHistoryService:
                 if data.get("ok") and "messages" in data:
                     messages = data["messages"]
                     formatted_turns = []
-                    for i, msg in enumerate(messages, 1):
-                        user_id = msg.get("user") or msg.get("bot_id") or "Participant"
+                    for msg in messages:
                         text = msg.get("text", "").strip()
-                        formatted_turns.append(f"Turn {i} ({user_id}): {text}")
+                        if not text:
+                            continue
+                        
+                        # Differentiate Human User vs AI Assistant Bot messages
+                        if msg.get("bot_id") or msg.get("subtype") == "bot_message":
+                            role = "Assistant (AI)"
+                        else:
+                            role = "User (Human)"
+                        
+                        formatted_turns.append(f"### {role}:\n{text}")
                     
-                    history_str = "\n".join(formatted_turns)
-                    logger.info(f"💬 Retrieved {len(messages)} messages from Slack thread {thread_ts}.")
+                    history_str = "\n\n".join(formatted_turns)
+                    logger.info(f"💬 Retrieved {len(messages)} messages from Slack thread {thread_ts} with clean User/Assistant role formatting.")
                     return history_str
         except Exception as e:
             logger.warning(f"⚠️ Failed to fetch Slack thread history: {e}")
