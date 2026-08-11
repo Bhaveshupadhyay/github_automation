@@ -55,12 +55,12 @@ class CodeDevelopmentService(ICodeDevelopmentService):
 
         # Step 4: Stream Execution of Native Google Antigravity CLI (agy) Engine in Target Workspace
         full_prompt = f"{self.config.user_prompt}\n\n### Mandatory Graphify AST Knowledge Context:\n{graph_context}"
-        logger.info(f"🤖 Executing Native Antigravity CLI (agy) in workspace '.' with effort: {self.config.effort_val}...")
+        logger.info(f"🤖 Executing Native Antigravity CLI (agy) with --add-dir . and effort: {self.config.effort_val}...")
         
         cmd = [
             "agy", "--print", full_prompt,
             "--dangerously-skip-permissions",
-            "--workspace", ".",
+            "--add-dir", ".",
             "--effort", self.config.effort_val
         ]
         
