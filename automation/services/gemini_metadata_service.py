@@ -12,7 +12,7 @@ from google.genai import types
 from automation.domain.models import GitPRDetails, WorkflowEnvironment
 from automation.domain.constants import SpecialTags
 from automation.interfaces.metadata_service_interface import IMetadataService
-from automation.services.gemini_intent_router_service import normalize_gemini_model
+from automation.services.gemini_intent_router_service import normalize_gemini_model, get_gemini_api_key
 
 logger = logging.getLogger("automation.metadata")
 
@@ -77,7 +77,7 @@ class GeminiLLMMetadataService(IMetadataService):
         # 1. Reuse existing branch if explicitly provided or found via Slack thread PR metadata
         semantic_branch = self.config.existing_branch or self._find_existing_thread_branch()
 
-        api_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
+        api_key = get_gemini_api_key()
         execution_summary = self._extract_agy_execution_summary()
         
         # 2. Use Google's Official SDK for structured Pydantic response generation
@@ -100,9 +100,10 @@ class GeminiLLMMetadataService(IMetadataService):
                     f"User Prompt: {self.config.user_prompt}\n\n"
                     f"AGY Execution Summary:\n{execution_summary}"
                 )
+                api_model = normalize_gemini_model(self.config.model_name)
 
                 response = client.models.generate_content(
-                    model=normalize_gemini_model(self.config.model_name),
+                    model=api_model,
                     contents=prompt_content,
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,

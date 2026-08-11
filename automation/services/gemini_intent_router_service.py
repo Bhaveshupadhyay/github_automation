@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from google import genai
 from google.genai import types
@@ -8,6 +9,23 @@ from automation.domain.models import WorkflowEnvironment, TaskIntent, TaskCatego
 from automation.interfaces.intent_router_interface import IIntentRouterService
 
 logger = logging.getLogger("automation.intent_router")
+
+def get_gemini_api_key() -> str:
+    """Scans environment variables and local config for Gemini API key."""
+    env_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
+    if env_key:
+        return env_key
+    
+    creds_path = os.path.expanduser("~/.gemini/oauth_creds.json")
+    if os.path.exists(creds_path):
+        try:
+            with open(creds_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and "api_key" in data and data["api_key"]:
+                    return data["api_key"]
+        except Exception:
+            pass
+    return ""
 
 def normalize_gemini_model(model_name: str) -> str:
     """Normalizes agy CLI internal model strings (e.g. gemini-3.5-flash-lite) to valid Gemini API models."""
@@ -27,7 +45,7 @@ class GeminiIntentRouterService(IIntentRouterService):
         self.config = config
 
     def classify_intent(self) -> TaskIntent:
-        api_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
+        api_key = get_gemini_api_key()
         
         if api_key:
             try:
@@ -64,12 +82,13 @@ class GeminiIntentRouterService(IIntentRouterService):
                     logger.info(f"💡 Reasoning: {intent.reasoning}")
                     return intent
             except Exception as e:
-                logger.warning(f"⚠️ Intent classification call exception: {e}. Defaulting to clarification request.")
+                logger.warning(f"⚠️ Intent Router API exception: {e}. Defaulting to CODE_DEVELOPMENT pipeline.")
+        else:
+            logger.info("ℹ️ Gemini API key not detected. Defaulting to CODE_DEVELOPMENT pipeline.")
 
-        # Failsafe fallback: Fail closed to CLARIFICATION_NEEDED if API key or SDK call fails
+        # Failsafe fallback: Default to CODE_DEVELOPMENT so agy engine handles the coding task
         return TaskIntent(
-            category=TaskCategory.CLARIFICATION_NEEDED,
+            category=TaskCategory.CODE_DEVELOPMENT,
             confidence=1.0,
-            reasoning="Intent classification service is temporarily unavailable.",
-            clarification_question="Intent classification service is temporarily unavailable. Could you please re-phrase or retry your request?"
+            reasoning="Default fallback to Code Development pipeline."
         )
