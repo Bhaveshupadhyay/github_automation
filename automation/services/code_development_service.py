@@ -63,17 +63,19 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             os.makedirs(rules_dst, exist_ok=True)
             subprocess.run(f"cp -r {rules_src}/* {rules_dst}/ 2>/dev/null || true", shell=True)
 
-        # Step 5: Stream Execution of Native Google Antigravity CLI (agy) Engine with gemini-3.6-flash
+        # Step 5: Stream Execution of Native Google Antigravity CLI (agy) Engine with gemini-3.6-flash & --effort high
         full_prompt = f"{self.config.user_prompt}{thread_history}\n\n### Mandatory Graphify AST Knowledge Context:\n{graph_context}"
         agy_model = DEFAULT_AGY_MODEL
+        effort_val = self.config.effort_val if self.config.effort_val else "high"
         
-        logger.info(f"🤖 Executing Native Antigravity CLI (agy) with model {agy_model}, --add-dir ., --print-timeout 15m0s...")
+        logger.info(f"🤖 Executing Native Antigravity CLI (agy) with model {agy_model}, --effort {effort_val}, --add-dir ., --print-timeout 15m0s...")
         
         cmd = [
             "agy", "--print", full_prompt,
             "--dangerously-skip-permissions",
             "--add-dir", ".",
             "--model", agy_model,
+            "--effort", effort_val,
             "--print-timeout", "15m0s"
         ]
         
