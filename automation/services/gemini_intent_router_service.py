@@ -13,8 +13,8 @@ logger = logging.getLogger("automation.intent_router")
 def get_gemini_api_key() -> str:
     """Scans environment variables and local config for Gemini API key."""
     env_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
-    logger.info(f"GEMINI_API_KEY: {env_key}")
     if env_key:
+        logger.info(f"🔑 Gemini API Key detected from environment (Length: {len(env_key)} chars).")
         return env_key
     
     creds_path = os.path.expanduser("~/.gemini/oauth_creds.json")
@@ -23,9 +23,13 @@ def get_gemini_api_key() -> str:
             with open(creds_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict) and "api_key" in data and data["api_key"]:
-                    return data["api_key"]
+                    key = data["api_key"]
+                    logger.info(f"🔑 Gemini API Key detected from ~/.gemini/oauth_creds.json (Length: {len(key)} chars).")
+                    return key
         except Exception:
             pass
+            
+    logger.info("ℹ️ No Gemini API Key detected in environment or local config files.")
     return ""
 
 def normalize_gemini_model(model_name: str) -> str:
@@ -52,7 +56,7 @@ class GeminiIntentRouterService(IIntentRouterService):
             try:
                 client = genai.Client(
                     api_key=api_key,
-                    http_options=types.HttpOptions(timeout=15.0)
+                    http_options=types.HttpOptions(timeout=30.0)
                 )
                 
                 system_instruction = (
@@ -84,9 +88,7 @@ class GeminiIntentRouterService(IIntentRouterService):
                     return intent
             except Exception as e:
                 logger.warning(f"⚠️ Intent Router API exception: {e}. Defaulting to CODE_DEVELOPMENT pipeline.")
-        else:
-            logger.info("ℹ️ Gemini API key not detected. Defaulting to CODE_DEVELOPMENT pipeline.")
-
+        
         # Failsafe fallback: Default to CODE_DEVELOPMENT so agy engine handles the coding task
         return TaskIntent(
             category=TaskCategory.CODE_DEVELOPMENT,
