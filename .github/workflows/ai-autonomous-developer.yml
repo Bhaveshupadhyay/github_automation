@@ -114,77 +114,7 @@ jobs:
           echo "Cloning $TARGET_REPO..."
           git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git workspace_target
 
-      - name: Build & Query Graphify AST Knowledge Graph
-        id: graphify_step
-        working-directory: workspace_target
-        run: |
-          echo "=========================================================================="
-          echo "📊 GENERATING GRAPHIFY AST KNOWLEDGE GRAPH"
-          echo "=========================================================================="
-          uv run graphify update . || pip install graphify-cli && graphify update . || true
-          
-          PROMPT="${{ steps.extract_vars.outputs.user_prompt }}"
-          echo "=========================================================================="
-          echo "🔍 GRAPHIFY QUERY RESULT FOR: $PROMPT"
-          echo "=========================================================================="
-          uv run graphify query "$PROMPT" | tee graphify_context.txt || true
-
-      - name: Copy Antigravity Rules to Workspace
-        run: |
-          mkdir -p workspace_target/.agents/rules
-          cp -r .agents/rules/* workspace_target/.agents/rules/ 2>/dev/null || true
-
-      - name: Run Antigravity Autonomous Agent Engine (Live Streamed Logs)
-        id: run_agy
-        working-directory: workspace_target
-        run: |
-          PROMPT="${{ steps.extract_vars.outputs.user_prompt }}"
-          EFFORT_VAL="${{ steps.extract_vars.outputs.effort }}"
-          
-          GRAPH_CTX=""
-          if [ -f "graphify_context.txt" ]; then
-            GRAPH_CTX=$(cat graphify_context.txt)
-          fi
-
-          FULL_PROMPT="$PROMPT
-
-### Mandatory Graphify AST Knowledge Context:
-$GRAPH_CTX"
-
-          echo "=========================================================================="
-          echo "🤖 EXECUTING GOOGLE ANTIGRAVITY CLI (agy) | EFFORT: $EFFORT_VAL"
-          echo "=========================================================================="
-          
-          agy --print "$FULL_PROMPT" \
-            --dangerously-skip-permissions \
-            --effort "$EFFORT_VAL" 2>&1 | tee ../agy_execution.log || true
-
-      - name: Handle Clarification Requests (Interactive Loop)
-        working-directory: workspace_target
-        env:
-          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL: ${{ steps.extract_vars.outputs.slack_channel }}
-          SLACK_THREAD: ${{ steps.extract_vars.outputs.slack_thread_ts }}
-        run: |
-          if grep -q "CLARIFICATION_NEEDED:" ../agy_execution.log; then
-            QUESTION=$(grep "CLARIFICATION_NEEDED:" ../agy_execution.log | head -n 1 | sed 's/CLARIFICATION_NEEDED://')
-            echo "Clarification requested by AI: $QUESTION"
-            
-            if [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
-              curl -s -X POST https://slack.com/api/chat.postMessage \
-                -H "Authorization: Bearer ${SLACK_TOKEN}" \
-                -H "Content-Type: application/json" \
-                -d json_payload=$(jq -n \
-                  --arg chan "$SLACK_CHANNEL" \
-                  --arg thread "$SLACK_THREAD" \
-                  --arg question "$QUESTION" \
-                  '{channel: $chan, thread_ts: $thread, text: ("❓ *Clarification Needed by Antigravity AI:*\n\n" + $question + "\n\n💬 *Please reply in this thread with the requested detail!*")}')
-            fi
-            echo "CLARIFICATION_EXIT=true" >> $GITHUB_ENV
-          fi
-
-      - name: Clean Up Rules/Skills, Create/Update Branch, Open/Update PR & Notify Slack
-        if: env.CLARIFICATION_EXIT != 'true'
+      - name: Run Master AI Orchestrator (Intent Router + Task Dispatcher)
         working-directory: workspace_target
         env:
           PYTHONPATH: ".."
