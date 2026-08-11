@@ -2,9 +2,11 @@ from typing import Optional
 from automation.domain.models import WorkflowEnvironment, GitPRDetails
 from automation.interfaces.metadata_service_interface import IMetadataService
 from automation.interfaces.intent_router_interface import IIntentRouterService
+from automation.interfaces.code_development_interface import ICodeDevelopmentService
 from automation.services.cleanup_service import WorkspaceCleanupService
 from automation.services.gemini_intent_router_service import GeminiIntentRouterService
 from automation.services.deployment_service import DeploymentService
+from automation.services.code_development_service import CodeDevelopmentService
 from automation.services.gemini_metadata_service import GeminiLLMMetadataService
 from automation.services.git_pr_service import GitPRService
 from automation.services.notification_service import NotificationService
@@ -30,6 +32,10 @@ class Container:
 
     def get_deployment_service(self) -> DeploymentService:
         return DeploymentService(config=self.config)
+
+    def get_code_development_service(self) -> ICodeDevelopmentService:
+        """Returns concrete instance implementing ICodeDevelopmentService (CodeDevelopmentService)."""
+        return CodeDevelopmentService(container=self)
 
     def get_metadata_service(self) -> IMetadataService:
         """Returns instance of IMetadataService interface (GeminiLLMMetadataService)."""

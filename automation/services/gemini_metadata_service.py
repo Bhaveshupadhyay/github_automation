@@ -9,6 +9,7 @@ from google import genai
 from google.genai import types
 
 from automation.domain.models import GitPRDetails, WorkflowEnvironment
+from automation.domain.constants import SpecialTags
 from automation.interfaces.metadata_service_interface import IMetadataService
 
 logger = logging.getLogger("automation.metadata")
@@ -24,11 +25,13 @@ class GeminiLLMMetadataService(IMetadataService):
     def _extract_agy_execution_summary(self) -> str:
         """Extracts AGY_EXECUTION_SUMMARY section from agy execution log file."""
         log_path = self.config.execution_log_path
+        tag = SpecialTags.AGY_EXECUTION_SUMMARY.value
+        
         if os.path.exists(log_path):
             try:
                 with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
-                    matches = re.split(r"AGY_EXECUTION_SUMMARY:", content)
+                    matches = re.split(re.escape(tag), content)
                     if len(matches) > 1:
                         summary_text = matches[-1].strip()
                         logger.info("📋 Extracted AGY Execution Summary from log file.")
