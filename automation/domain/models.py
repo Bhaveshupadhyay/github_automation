@@ -2,6 +2,7 @@ import os
 from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field
+from automation.domain.constants import DEFAULT_GEMINI_MODEL
 
 class TaskCategory(str, Enum):
     """Categories of incoming user requests."""
@@ -26,7 +27,7 @@ class WorkflowEnvironment(BaseModel):
     existing_branch: Optional[str] = Field(default_factory=lambda: os.getenv("EXISTING_BRANCH"))
     target_repo: str = Field(default_factory=lambda: os.getenv("TARGET_REPO", ""))
     user_prompt: str = Field(default_factory=lambda: os.getenv("USER_PROMPT", ""))
-    model_name: str = Field(default_factory=lambda: os.getenv("MODEL_NAME", "gemini-3.1-flash-lite"))
+    model_name: str = Field(default_factory=lambda: os.getenv("MODEL_NAME", DEFAULT_GEMINI_MODEL))
     effort_val: str = Field(default_factory=lambda: os.getenv("EFFORT_VAL", "high"))
     execution_log_path: str = Field(default="../agy_execution.log")
 
