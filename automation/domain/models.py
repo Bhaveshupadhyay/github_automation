@@ -25,10 +25,13 @@ class TaskIntent(BaseModel):
 def extract_target_repo(user_prompt: str, env_target: str) -> str:
     """Extracts explicit owner/repo slug from user prompt if present. Returns empty string if no repo found."""
     if user_prompt:
-        # Match owner/repo pattern e.g. bhaveshupadhyay/culture_box or owner-name/repo-name
-        matches = re.findall(r"([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)", user_prompt)
+        # Strip full URLs to prevent URL fragments from misparsing
+        cleaned_prompt = re.sub(r"https?://[^\s]+", "", user_prompt)
+        cleaned_prompt = re.sub(r"github\.com/[^\s]+", "", cleaned_prompt)
+        
+        matches = re.findall(r"\b([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)\b", cleaned_prompt)
         for slug in matches:
-            if not slug.startswith("http") and not slug.startswith("github.com") and not slug.startswith("Original/Request"):
+            if not slug.lower().startswith("original"):
                 logger.info(f"🎯 Extracted explicit Target Repo '{slug}' from user prompt.")
                 return slug
     return env_target.strip() if env_target else ""

@@ -5,7 +5,6 @@ import urllib.request
 from google import genai
 from google.genai import types
 
-from automation.domain.constants import DEFAULT_GEMINI_MODEL
 from automation.domain.models import WorkflowEnvironment, TaskIntent, TaskCategory
 from automation.interfaces.intent_router_interface import IIntentRouterService
 from automation.utils.credentials import get_gemini_api_key, normalize_gemini_model
