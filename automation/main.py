@@ -1,7 +1,7 @@
 import sys
 from automation.domain.models import WorkflowEnvironment
 from automation.services.cleanup_service import WorkspaceCleanupService
-from automation.services.log_parser_service import LogParserService
+from automation.services.llm_metadata_service import LLMMetadataService
 from automation.services.git_pr_service import GitPRService
 from automation.services.notification_service import NotificationService
 
@@ -15,14 +15,9 @@ def main():
     # 1. Clean up workspace unwanted files
     WorkspaceCleanupService.cleanup_unwanted_files()
 
-    # 2. Parse logs & build PR domain details
-    parser = LogParserService(
-        log_path=config.execution_log_path,
-        prompt=config.user_prompt,
-        model_name=config.model_name,
-        effort_val=config.effort_val
-    )
-    pr_details = parser.parse_details()
+    # 2. Use LLM Service for intelligent semantic Git & PR metadata generation
+    metadata_service = LLMMetadataService(config)
+    pr_details = metadata_service.generate_metadata()
 
     # 3. Handle Git & PR creation
     git_service = GitPRService(config, pr_details)
