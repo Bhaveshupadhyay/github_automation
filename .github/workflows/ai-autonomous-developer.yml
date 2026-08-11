@@ -42,7 +42,7 @@ jobs:
 
       - name: Install Project Dependencies via uv
         run: |
-          uv sync || uv pip install pydantic google-genai graphify-cli
+          uv sync
 
       - name: Install Antigravity CLI (agy)
         run: |
@@ -130,4 +130,4 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.AGY_API_KEY }}
           AGY_API_KEY: ${{ secrets.AGY_API_KEY }}
         run: |
-          uv run python -m automation.main || python3 -m automation.main
+          uv run --project .. python -m automation.main || uv run --with google-genai --with pydantic --with graphify-cli python -m automation.main || python3 -m automation.main
