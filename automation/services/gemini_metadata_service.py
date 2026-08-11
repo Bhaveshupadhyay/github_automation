@@ -85,7 +85,7 @@ class GeminiLLMMetadataService(IMetadataService):
             try:
                 client = genai.Client(
                     api_key=api_key,
-                    http_options=types.HttpOptions(timeout=20.0)
+                    http_options=types.HttpOptions(timeout=60.0)
                 )
                 
                 system_instruction = (
