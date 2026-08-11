@@ -12,6 +12,7 @@ from google.genai import types
 from automation.domain.models import GitPRDetails, WorkflowEnvironment
 from automation.domain.constants import SpecialTags
 from automation.interfaces.metadata_service_interface import IMetadataService
+from automation.services.gemini_intent_router_service import normalize_gemini_model
 
 logger = logging.getLogger("automation.metadata")
 
@@ -101,7 +102,7 @@ class GeminiLLMMetadataService(IMetadataService):
                 )
 
                 response = client.models.generate_content(
-                    model=self.config.model_name,
+                    model=normalize_gemini_model(self.config.model_name),
                     contents=prompt_content,
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
