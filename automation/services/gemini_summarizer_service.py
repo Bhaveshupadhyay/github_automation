@@ -3,10 +3,9 @@ import logging
 import urllib.request
 from typing import Optional
 
-from automation.domain.constants import DEFAULT_GEMINI_MODEL
 from automation.domain.models import WorkflowEnvironment
 from automation.interfaces.summarizer_interface import ISummarizerService
-from automation.services.gemini_intent_router_service import get_gemini_api_key
+from automation.utils.credentials import get_gemini_api_key, normalize_gemini_model
 
 logger = logging.getLogger("automation.summarizer")
 
@@ -31,8 +30,10 @@ class GeminiLLMSummarizerService(ISummarizerService):
             "Do NOT output file lists, code snippets, Markdown headers, or technical file paths."
         )
 
+        api_model = normalize_gemini_model(self.config.model_name)
+
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{DEFAULT_GEMINI_MODEL}:generateContent"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{api_model}:generateContent"
             payload = {
                 "system_instruction": {"parts": [{"text": system_instruction}]},
                 "contents": [{"parts": [{"text": f"Verbose Agent Response:\n{verbose_text[:2000]}"}]}],
@@ -50,10 +51,14 @@ class GeminiLLMSummarizerService(ISummarizerService):
 
             with urllib.request.urlopen(req, timeout=10) as resp:
                 res_data = json.loads(resp.read().decode("utf-8"))
-                candidate_text = res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                if candidate_text:
-                    logger.info(f"✨ Gemini LLM Summarized Clarification Question: '{candidate_text}'")
-                    return candidate_text
+                candidates = res_data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        candidate_text = parts[0].get("text", "").strip()
+                        if candidate_text:
+                            logger.info(f"✨ Gemini LLM Summarized Clarification Question: '{candidate_text}'")
+                            return candidate_text
         except Exception as e:
             logger.warning(f"⚠️ Gemini LLM summarization exception: {e}. Falling back to clean text preview.")
 
