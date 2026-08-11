@@ -13,6 +13,7 @@ logger = logging.getLogger("automation.intent_router")
 def get_gemini_api_key() -> str:
     """Scans environment variables and local config for Gemini API key."""
     env_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
+    logger.info(f"GEMINI_API_KEY: {env_key}")
     if env_key:
         return env_key
     
