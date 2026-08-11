@@ -19,7 +19,10 @@ class GeminiIntentRouterService(IIntentRouterService):
         
         if api_key:
             try:
-                client = genai.Client(api_key=api_key)
+                client = genai.Client(
+                    api_key=api_key,
+                    http_options=types.HttpOptions(timeout=15.0)
+                )
                 
                 system_instruction = (
                     "You are an expert AI DevOps & Software Engineering Dispatcher.\n"
@@ -48,11 +51,12 @@ class GeminiIntentRouterService(IIntentRouterService):
                     logger.info(f"💡 Reasoning: {intent.reasoning}")
                     return intent
             except Exception as e:
-                logger.warning(f"⚠️ Intent classification call exception: {e}. Defaulting to CODE_DEVELOPMENT.")
+                logger.warning(f"⚠️ Intent classification call exception: {e}. Defaulting to clarification request.")
 
-        # Failsafe fallback: Default to CODE_DEVELOPMENT if API key or SDK call fails
+        # Failsafe fallback: Fail closed to CLARIFICATION_NEEDED if API key or SDK call fails
         return TaskIntent(
-            category=TaskCategory.CODE_DEVELOPMENT,
+            category=TaskCategory.CLARIFICATION_NEEDED,
             confidence=1.0,
-            reasoning="Default fallback to code development."
+            reasoning="Intent classification service is temporarily unavailable.",
+            clarification_question="Intent classification service is temporarily unavailable. Could you please re-phrase or retry your request?"
         )

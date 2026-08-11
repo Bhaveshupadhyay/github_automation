@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import json
 import logging
 import subprocess
@@ -40,8 +41,11 @@ class GeminiLLMMetadataService(IMetadataService):
                 logger.warning(f"Failed to read agy execution log summary: {e}")
         
         # Fallback to git diff summary if log summary is unavailable
-        res = subprocess.run(["git", "diff", "--stat"], capture_output=True, text=True)
-        return res.stdout.strip()[:1000]
+        try:
+            res = subprocess.run(["git", "diff", "--stat"], capture_output=True, text=True, timeout=10)
+            return res.stdout.strip()[:1000]
+        except Exception:
+            return "Git diff summary unavailable."
 
     def _find_existing_thread_branch(self) -> Optional[str]:
         """Queries GitHub for existing PRs matching slack_thread_ts to reuse exact semantic branch name."""
@@ -52,16 +56,17 @@ class GeminiLLMMetadataService(IMetadataService):
             cmd = [
                 "gh", "pr", "list",
                 "--repo", self.config.target_repo,
-                "--search", f"slack_thread: {self.config.slack_thread_ts}",
+                "--search", f"\"slack_thread: {self.config.slack_thread_ts}\" in:body",
                 "--json", "headRefName"
             ]
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if res.returncode == 0 and res.stdout.strip():
                 prs = json.loads(res.stdout.strip())
-                if prs and isinstance(prs, list) and "headRefName" in prs[0]:
+                if prs and isinstance(prs, list) and len(prs) > 0 and "headRefName" in prs[0]:
                     existing_branch = prs[0]["headRefName"]
-                    logger.info(f"🔍 Found existing semantic PR branch for thread {self.config.slack_thread_ts}: {existing_branch}")
-                    return existing_branch
+                    if existing_branch and existing_branch.strip():
+                        logger.info(f"🔍 Found existing semantic PR branch for thread {self.config.slack_thread_ts}: {existing_branch}")
+                        return existing_branch.strip()
         except Exception as e:
             logger.debug(f"Thread PR lookup exception: {e}")
 
@@ -77,7 +82,10 @@ class GeminiLLMMetadataService(IMetadataService):
         # 2. Use Google's Official SDK for structured Pydantic response generation
         if api_key:
             try:
-                client = genai.Client(api_key=api_key)
+                client = genai.Client(
+                    api_key=api_key,
+                    http_options=types.HttpOptions(timeout=20.0)
+                )
                 
                 system_instruction = (
                     "You are an expert Git Release Manager.\n"
@@ -123,7 +131,7 @@ class GeminiLLMMetadataService(IMetadataService):
         if not semantic_branch:
             clean_slug = re.sub(r"[^a-z0-9]", "-", self.config.user_prompt.lower())
             clean_slug = re.sub(r"-+", "-", clean_slug).strip("-")[:35]
-            timestamp = int(subprocess.check_output(["date", "+%s"]).decode().strip())
+            timestamp = int(time.time())
             branch_name = f"feat/{clean_slug}-{timestamp}"
         else:
             branch_name = semantic_branch

@@ -5,6 +5,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from automation.domain.constants import SpecialTags
+from automation.domain.models import TaskIntent, TaskCategory
 from automation.interfaces.code_development_interface import ICodeDevelopmentService
 
 if TYPE_CHECKING:
@@ -28,10 +29,10 @@ class CodeDevelopmentService(ICodeDevelopmentService):
 
         # Step 2: Build & Query Graphify AST Knowledge Graph
         logger.info("📊 Generating Graphify AST Knowledge Graph...")
-        subprocess.run(["graphify", "update", "."], capture_output=True, text=True)
+        subprocess.run(["graphify", "update", "."], capture_output=True, text=True, timeout=30)
         
         graph_context = ""
-        graph_res = subprocess.run(["graphify", "query", self.config.user_prompt], capture_output=True, text=True)
+        graph_res = subprocess.run(["graphify", "query", self.config.user_prompt], capture_output=True, text=True, timeout=30)
         if graph_res.returncode == 0 and graph_res.stdout.strip():
             graph_context = graph_res.stdout.strip()
             logger.info(f"🔍 Extracted Graphify AST Context ({len(graph_context)} chars).")
@@ -61,6 +62,10 @@ class CodeDevelopmentService(ICodeDevelopmentService):
                 log_file.write(line)
             proc.wait()
 
+        if proc.returncode != 0:
+            logger.error(f"❌ agy engine execution failed with exit code {proc.returncode}. Aborting PR pipeline.")
+            return
+
         # Step 5: Check for SpecialTags.CLARIFICATION_NEEDED tag in agy output
         tag = SpecialTags.CLARIFICATION_NEEDED.value
         if os.path.exists(self.config.execution_log_path):
@@ -69,8 +74,14 @@ class CodeDevelopmentService(ICodeDevelopmentService):
                 if tag in log_content:
                     question = log_content.split(tag)[1].split("\n")[0].strip()
                     logger.info(f"❓ agy requested clarification: {question}")
+                    clarification_intent = TaskIntent(
+                        category=TaskCategory.CLARIFICATION_NEEDED,
+                        confidence=1.0,
+                        reasoning="Clarification requested by agy CLI engine.",
+                        clarification_question=question
+                    )
                     notifier = self.container.get_notification_service()
-                    notifier.send_clarification_notification(question)
+                    notifier.send_clarification_notification(clarification_intent)
                     return
 
         # Step 6: Clean up injected files before git staging

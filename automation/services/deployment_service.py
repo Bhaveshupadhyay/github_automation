@@ -23,37 +23,53 @@ class DeploymentService:
         if "cloudflare" in action.lower() or "worker" in action.lower():
             logger.info("⚡ Executing Cloudflare Wrangler Deployment...")
             cmd = ["npx", "wrangler", "deploy"]
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            output_logs.append(res.stdout or res.stderr)
-            status_success = (res.returncode == 0)
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                output_logs.append(res.stdout or res.stderr)
+                status_success = (res.returncode == 0)
+            except subprocess.TimeoutExpired:
+                output_logs.append("❌ Cloudflare Wrangler deployment timed out after 120s.")
+                status_success = False
 
         # Action 2: Deploy to App Store / Play Store via Fastlane
         elif "app_store" in action.lower() or "play_store" in action.lower() or "fastlane" in action.lower():
             logger.info("📱 Executing Fastlane Mobile Deployment...")
             cmd = ["bundle", "exec", "fastlane", "release"]
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            output_logs.append(res.stdout or res.stderr)
-            status_success = (res.returncode == 0)
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                output_logs.append(res.stdout or res.stderr)
+                status_success = (res.returncode == 0)
+            except subprocess.TimeoutExpired:
+                output_logs.append("❌ Fastlane mobile deployment timed out after 300s.")
+                status_success = False
 
         # Action 3: Trigger GitHub Release / Deploy Workflow
         elif "workflow" in action.lower() or "github" in action.lower():
-            logger.info("Octocat Triggering GitHub Release Workflow...")
+            logger.info("Triggering GitHub Release Workflow...")
             cmd = ["gh", "workflow", "run", "deploy.yml", "--repo", self.config.target_repo]
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            output_logs.append(res.stdout or res.stderr)
-            status_success = (res.returncode == 0)
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                output_logs.append(res.stdout or res.stderr)
+                status_success = (res.returncode == 0)
+            except subprocess.TimeoutExpired:
+                output_logs.append("❌ GitHub Workflow dispatch timed out after 30s.")
+                status_success = False
 
-        # Action 4: Custom Deploy Script fallback
+        # Action 4: Custom Deploy Script fallback or fail-closed on unsupported action
         else:
             if os.path.exists("./deploy.sh"):
                 logger.info("📜 Executing custom ./deploy.sh script...")
-                res = subprocess.run(["bash", "./deploy.sh"], capture_output=True, text=True)
-                output_logs.append(res.stdout or res.stderr)
-                status_success = (res.returncode == 0)
+                try:
+                    res = subprocess.run(["bash", "./deploy.sh"], capture_output=True, text=True, timeout=180)
+                    output_logs.append(res.stdout or res.stderr)
+                    status_success = (res.returncode == 0)
+                except subprocess.TimeoutExpired:
+                    output_logs.append("❌ Custom ./deploy.sh timed out after 180s.")
+                    status_success = False
             else:
-                logger.info("ℹ️ General deployment trigger acknowledged. Executing automated build check...")
-                output_logs.append(f"Deployment task acknowledged for {self.config.target_repo}. Build check passed.")
-                status_success = True
+                logger.warning(f"⚠️ Unsupported deployment action '{action}' and no ./deploy.sh found.")
+                output_logs.append(f"Unsupported deployment action: '{action}'. No ./deploy.sh script found.")
+                status_success = False
 
         return {
             "action": action,
