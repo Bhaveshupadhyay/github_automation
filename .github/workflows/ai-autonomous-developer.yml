@@ -34,14 +34,15 @@ jobs:
       - name: Checkout Workflow Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python & Install Dependencies
-        uses: actions/setup-python@v5
+      - name: Setup uv & Python Environment
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
+          version: "latest"
+          enable-cache: true
 
-      - name: Install Google GenAI SDK, Pydantic & Graphify CLI
+      - name: Install Project Dependencies via uv
         run: |
-          pip install google-genai pydantic graphify-cli || true
+          uv sync || uv pip install pydantic google-genai graphify-cli
 
       - name: Install Antigravity CLI (agy)
         run: |
@@ -118,13 +119,13 @@ jobs:
           echo "=========================================================================="
           echo "📊 GENERATING GRAPHIFY AST KNOWLEDGE GRAPH"
           echo "=========================================================================="
-          graphify update . || true
+          uv run graphify update . || pip install graphify-cli && graphify update . || true
           
           PROMPT="${{ steps.extract_vars.outputs.user_prompt }}"
           echo "=========================================================================="
           echo "🔍 GRAPHIFY QUERY RESULT FOR: $PROMPT"
           echo "=========================================================================="
-          graphify query "$PROMPT" | tee graphify_context.txt || true
+          uv run graphify query "$PROMPT" | tee graphify_context.txt || true
 
       - name: Copy Antigravity Rules to Workspace
         run: |
@@ -196,4 +197,4 @@ $GRAPH_CTX"
           GEMINI_API_KEY: ${{ secrets.AGY_API_KEY }}
           AGY_API_KEY: ${{ secrets.AGY_API_KEY }}
         run: |
-          python3 -m automation.main
+          uv run python -m automation.main || python3 -m automation.main

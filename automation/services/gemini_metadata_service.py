@@ -4,15 +4,11 @@ import logging
 import subprocess
 from typing import Optional
 
+from google import genai
+from google.genai import types
+
 from automation.domain.models import GitPRDetails, WorkflowEnvironment
 from automation.interfaces.metadata_service_interface import IMetadataService
-
-try:
-    from google import genai
-    from google.genai import types
-    HAS_GENAI_SDK = True
-except ImportError:
-    HAS_GENAI_SDK = False
 
 logger = logging.getLogger("automation.metadata")
 
@@ -30,8 +26,8 @@ class GeminiLLMMetadataService(IMetadataService):
         api_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
         diff_summary = self._get_git_diff_summary()
         
-        # 1. Use Google's Official SDK if available and API key present
-        if HAS_GENAI_SDK and api_key:
+        # Use Google's Official SDK for structured Pydantic response generation
+        if api_key:
             try:
                 client = genai.Client(api_key=api_key)
                 
@@ -62,7 +58,7 @@ class GeminiLLMMetadataService(IMetadataService):
             except Exception as e:
                 logger.warning(f"⚠️ google-genai SDK call exception: {e}. Falling back to default formatting.")
 
-        # 2. Failsafe fallback logic if SDK is missing or key is absent
+        # Failsafe fallback logic if key is absent
         clean_slug = re.sub(r"[^a-z0-9]", "-", self.config.user_prompt.lower())
         clean_slug = re.sub(r"-+", "-", clean_slug).strip("-")[:35]
         timestamp = int(subprocess.check_output(["date", "+%s"]).decode().strip())
