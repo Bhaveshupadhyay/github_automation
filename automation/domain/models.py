@@ -23,16 +23,15 @@ class TaskIntent(BaseModel):
     clarification_question: Optional[str] = Field(default=None, description="Specific question to post if clarification is needed")
 
 def extract_target_repo(user_prompt: str, env_target: str) -> str:
-    """Extracts explicit owner/repo slug from user prompt if present, overriding environment default."""
+    """Extracts explicit owner/repo slug from user prompt if present. Returns empty string if no repo found."""
     if user_prompt:
-        # Search for owner/repo pattern like bhaveshupadhyay/culture_box
-        match = re.search(r"\b([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)\b", user_prompt)
-        if match:
-            slug = match.group(1)
-            if not slug.startswith("http") and not slug.startswith("github.com") and not slug.startswith("Original Request"):
+        # Match owner/repo pattern e.g. bhaveshupadhyay/culture_box or owner-name/repo-name
+        matches = re.findall(r"([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)", user_prompt)
+        for slug in matches:
+            if not slug.startswith("http") and not slug.startswith("github.com") and not slug.startswith("Original/Request"):
                 logger.info(f"🎯 Extracted explicit Target Repo '{slug}' from user prompt.")
                 return slug
-    return env_target or "bhaveshupadhyay/hiphomboombox_backend"
+    return env_target.strip() if env_target else ""
 
 class WorkflowEnvironment(BaseModel):
     """Pydantic domain model representing environment configuration passed from GitHub Actions."""

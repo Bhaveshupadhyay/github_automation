@@ -5,6 +5,7 @@ import urllib.request
 from google import genai
 from google.genai import types
 
+from automation.domain.constants import DEFAULT_GEMINI_MODEL
 from automation.domain.models import WorkflowEnvironment, TaskIntent, TaskCategory
 from automation.interfaces.intent_router_interface import IIntentRouterService
 from automation.utils.credentials import get_gemini_api_key, normalize_gemini_model
@@ -18,6 +19,16 @@ class GeminiIntentRouterService(IIntentRouterService):
         self.config = config
 
     def classify_intent(self) -> TaskIntent:
+        # Rule: If target repository is completely missing from environment and prompt, ask the user!
+        if not self.config.target_repo:
+            logger.info("❓ Target repository is missing. Asking user for target repository clarification...")
+            return TaskIntent(
+                category=TaskCategory.CLARIFICATION_NEEDED,
+                confidence=1.0,
+                reasoning="Target repository (owner/repo) is missing from environment and prompt.",
+                clarification_question="Which target repository (owner/repo) would you like me to work on? (e.g., bhaveshupadhyay/culture_box)"
+            )
+
         api_key = get_gemini_api_key()
         
         if api_key:
