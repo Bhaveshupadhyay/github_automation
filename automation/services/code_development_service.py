@@ -71,10 +71,15 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             "agy", "--print", full_prompt,
             "--dangerously-skip-permissions",
             "--add-dir", ".",
-            "--model", self.config.model_name,
-            "--print-timeout", "15m0s",
-            "--effort", self.config.effort_val
+            "--print-timeout", "15m0s"
         ]
+
+        if self.config.model_name:
+            cmd.extend(["--model", self.config.model_name])
+            
+        # --effort is only supported for reasoning models (not for flash-lite)
+        if self.config.effort_val and "lite" not in self.config.model_name.lower():
+            cmd.extend(["--effort", self.config.effort_val])
         
         agy_output_lines = []
         with open(self.config.execution_log_path, "w", encoding="utf-8") as log_file:
