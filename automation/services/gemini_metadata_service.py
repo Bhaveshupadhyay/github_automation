@@ -85,7 +85,7 @@ class GeminiLLMMetadataService(IMetadataService):
             try:
                 client = genai.Client(
                     api_key=api_key,
-                    http_options=types.HttpOptions(timeout=60.0)
+                    http_options=types.HttpOptions(timeout=45.0)
                 )
                 
                 system_instruction = (
@@ -101,6 +101,7 @@ class GeminiLLMMetadataService(IMetadataService):
                     f"AGY Execution Summary:\n{execution_summary}"
                 )
                 api_model = normalize_gemini_model(self.config.model_name)
+                logger.info(f"⚡ Requesting PR metadata from Gemini API model '{api_model}'...")
 
                 response = client.models.generate_content(
                     model=api_model,
@@ -127,7 +128,7 @@ class GeminiLLMMetadataService(IMetadataService):
                     logger.info(f"🤖 Gemini LLM Generated Commit Title: {details.commit_message}")
                     return details
             except Exception as e:
-                logger.warning(f"⚠️ google-genai SDK call exception: {e}. Falling back to default formatting.")
+                logger.warning(f"⚠️ google-genai SDK call exception [{type(e).__name__}]: {e}. Falling back to default formatting.")
 
         # 3. Failsafe fallback logic if SDK is missing or key is absent
         if not semantic_branch:
