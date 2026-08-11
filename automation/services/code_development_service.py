@@ -1,36 +1,63 @@
 import os
 import sys
-import re
+import json
 import logging
+import urllib.request
 import subprocess
 from typing import TYPE_CHECKING
 
-from automation.domain.constants import SpecialTags, DEFAULT_AGY_MODEL
+from automation.domain.constants import SpecialTags, DEFAULT_AGY_MODEL, DEFAULT_GEMINI_MODEL
 from automation.domain.models import TaskIntent, TaskCategory
 from automation.interfaces.code_development_interface import ICodeDevelopmentService
+from automation.services.gemini_intent_router_service import get_gemini_api_key
 
 if TYPE_CHECKING:
     from automation.dependency import Container
 
 logger = logging.getLogger("automation.code_dev")
 
-def extract_concise_question(text: str) -> str:
-    """Extracts a short, concise 1-sentence question from verbose CLI output text."""
-    if not text:
+def summarize_clarification_with_gemini(api_key: str, verbose_text: str) -> str:
+    """Uses Gemini LLM (gemini-3.1-flash-lite) to extract a clean, polite 1-sentence clarification question from verbose CLI output."""
+    if not verbose_text:
         return "Could you please specify the details for your request?"
-    
-    # 1. Search for sentences ending with '?'
-    questions = re.findall(r"([^.!?\n]*\?)", text)
-    for q in questions:
-        q_clean = q.strip()
-        if len(q_clean) > 10 and not q_clean.startswith("[") and not q_clean.startswith("1."):
-            return q_clean
-            
-    # 2. Fallback to first clean line
-    lines = [l.strip() for l in text.split("\n") if l.strip() and not l.startswith("[") and not l.startswith("1.") and not l.startswith("2.")]
-    if lines:
-        return lines[0][:200]
-    return text[:200]
+
+    if not api_key:
+        return verbose_text[:200]
+
+    system_instruction = (
+        "You are an expert AI Communication Summarizer.\n"
+        "Your task: Read the verbose technical response from the coding agent and summarize what clarification or missing detail is needed from the user.\n"
+        "Return ONLY a clean, polite, 1-sentence question (e.g. 'What would you like to change the app name to?').\n"
+        "Do NOT output file lists, code snippets, Markdown headers, or technical file paths."
+    )
+
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{DEFAULT_GEMINI_MODEL}:generateContent"
+        payload = {
+            "system_instruction": {"parts": [{"text": system_instruction}]},
+            "contents": [{"parts": [{"text": f"Verbose Agent Response:\n{verbose_text[:2000]}"}]}],
+            "generationConfig": {"temperature": 0.2}
+        }
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-goog-api-key": api_key
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            res_data = json.loads(resp.read().decode("utf-8"))
+            candidate_text = res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if candidate_text:
+                logger.info(f"✨ Gemini LLM Summarized Clarification Question: '{candidate_text}'")
+                return candidate_text
+    except Exception as e:
+        logger.warning(f"⚠️ Gemini LLM summarization exception: {e}. Falling back to clean text preview.")
+
+    return verbose_text[:200]
 
 class CodeDevelopmentService(ICodeDevelopmentService):
     """Dedicated service handling the end-to-end Code Development Pipeline."""
@@ -141,8 +168,9 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         git_service = self.container.get_git_pr_service(pr_details)
         if not git_service.has_changes():
             logger.info("ℹ️ No file changes were produced by the agent.")
-            # Extract short, concise 1-sentence question from agy output instead of verbose log dumps
-            concise_question = extract_concise_question(agy_full_output)
+            # Use Gemini LLM to summarize verbose CLI output into a clean 1-sentence question
+            api_key = get_gemini_api_key()
+            concise_question = summarize_clarification_with_gemini(api_key, agy_full_output)
             
             logger.info(f"💬 Relaying concise clarification question to Slack thread: '{concise_question}'")
             clarification_intent = TaskIntent(
