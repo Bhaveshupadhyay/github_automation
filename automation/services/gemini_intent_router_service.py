@@ -34,14 +34,7 @@ def get_gemini_api_key() -> str:
     return ""
 
 def normalize_gemini_model(model_name: str) -> str:
-    """Normalizes agy CLI internal model strings (e.g. gemini-3.5-flash-lite) to valid Gemini API models."""
-    if not model_name:
-        return DEFAULT_GEMINI_MODEL
-    model_lower = model_name.lower()
-    if "pro" in model_lower:
-        return "gemini-2.5-pro"
-    elif "flash" in model_lower or "lite" in model_lower:
-        return DEFAULT_GEMINI_MODEL
+    """Always returns gemini-3.1-flash-lite for Python SDK / REST calls."""
     return DEFAULT_GEMINI_MODEL
 
 class GeminiIntentRouterService(IIntentRouterService):
@@ -72,7 +65,7 @@ class GeminiIntentRouterService(IIntentRouterService):
                     api_key=api_key,
                     http_options=types.HttpOptions(
                         headers={"X-goog-api-key": api_key},
-                        timeout=15
+                        timeout=15.0
                     )
                 )
 
@@ -88,7 +81,7 @@ class GeminiIntentRouterService(IIntentRouterService):
 
                 if response.parsed and isinstance(response.parsed, TaskIntent):
                     intent: TaskIntent = response.parsed
-                    logger.info(f"🎯 Classified Task Intent via SDK: {intent.category.value} (Confidence: {intent.confidence})")
+                    logger.info(f"🎯 Classified Task Intent via SDK ({api_model}): {intent.category.value} (Confidence: {intent.confidence})")
                     logger.info(f"💡 Reasoning: {intent.reasoning}")
                     return intent
             except Exception as e:
@@ -121,7 +114,7 @@ class GeminiIntentRouterService(IIntentRouterService):
                     if "confidence" not in parsed_json:
                         parsed_json["confidence"] = 1.0
                     intent = TaskIntent(**parsed_json)
-                    logger.info(f"🎯 Classified Task Intent via REST API: {intent.category.value} (Confidence: {intent.confidence})")
+                    logger.info(f"🎯 Classified Task Intent via REST API ({api_model}): {intent.category.value} (Confidence: {intent.confidence})")
                     logger.info(f"💡 Reasoning: {intent.reasoning}")
                     return intent
             except Exception as ex:

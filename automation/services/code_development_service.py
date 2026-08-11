@@ -4,7 +4,7 @@ import logging
 import subprocess
 from typing import TYPE_CHECKING
 
-from automation.domain.constants import SpecialTags
+from automation.domain.constants import SpecialTags, DEFAULT_AGY_MODEL
 from automation.domain.models import TaskIntent, TaskCategory
 from automation.interfaces.code_development_interface import ICodeDevelopmentService
 
@@ -63,23 +63,19 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             os.makedirs(rules_dst, exist_ok=True)
             subprocess.run(f"cp -r {rules_src}/* {rules_dst}/ 2>/dev/null || true", shell=True)
 
-        # Step 5: Stream Execution of Native Google Antigravity CLI (agy) Engine with --print-timeout 15m0s
+        # Step 5: Stream Execution of Native Google Antigravity CLI (agy) Engine with gemini-3.6-flash
         full_prompt = f"{self.config.user_prompt}{thread_history}\n\n### Mandatory Graphify AST Knowledge Context:\n{graph_context}"
-        logger.info(f"🤖 Executing Native Antigravity CLI (agy) with model {self.config.model_name}, --add-dir ., --print-timeout 15m0s...")
+        agy_model = DEFAULT_AGY_MODEL
+        
+        logger.info(f"🤖 Executing Native Antigravity CLI (agy) with model {agy_model}, --add-dir ., --print-timeout 15m0s...")
         
         cmd = [
             "agy", "--print", full_prompt,
             "--dangerously-skip-permissions",
             "--add-dir", ".",
+            "--model", agy_model,
             "--print-timeout", "15m0s"
         ]
-
-        if self.config.model_name:
-            cmd.extend(["--model", self.config.model_name])
-            
-        # --effort is only supported for reasoning models (not for flash-lite)
-        if self.config.effort_val and "lite" not in self.config.model_name.lower():
-            cmd.extend(["--effort", self.config.effort_val])
         
         agy_output_lines = []
         with open(self.config.execution_log_path, "w", encoding="utf-8") as log_file:
