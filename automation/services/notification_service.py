@@ -35,7 +35,7 @@ class NotificationService(INotificationService):
 
         try:
             # Enforce strict 5-second HTTP timeout
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with ullib.request.urlopen(req, timeout=5) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
                 if result.get("ok"):
                     logger.info("✅ Slack notification posted successfully!")
