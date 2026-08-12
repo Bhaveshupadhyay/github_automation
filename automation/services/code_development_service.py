@@ -51,6 +51,27 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             logger.warning("⚠️ 'uv' executable not found. Falling back to direct binary execution.")
             return subprocess.run(args, capture_output=True, text=True, timeout=30)
 
+    def _resolve_agy_binary(self) -> str:
+        """Finds the absolute path to the agy CLI binary across system PATH and standard install directories."""
+        path_which = shutil.which("agy")
+        if path_which and os.path.exists(path_which):
+            return path_which
+
+        home = os.path.expanduser("~")
+        candidate_paths = [
+            os.path.join(home, ".local", "bin", "agy"),
+            os.path.join(home, ".gemini", "antigravity-cli", "bin", "agy"),
+            os.path.join(home, ".gemini", "antigravity-cli", "agy"),
+            "/usr/local/bin/agy",
+            "/usr/bin/agy",
+        ]
+        for p in candidate_paths:
+            if os.path.exists(p) and os.access(p, os.X_OK):
+                logger.info(f"📍 Resolved agy binary at explicit path: {p}")
+                return p
+
+        return "agy"
+
     def execute_pipeline(self) -> None:
         logger.info("🛠️ Executing Code Development Pipeline (Graphify AST + agy Engine + Git Branch & PR)...")
 
@@ -94,8 +115,9 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         
         logger.info(f"🤖 Executing Native Antigravity CLI (agy) with model {agy_model}, --effort {effort_val}, --add-dir ., --print-timeout 15m0s...")
         
+        agy_bin = self._resolve_agy_binary()
         cmd = [
-            "agy", "--print", full_prompt,
+            agy_bin, "--print", full_prompt,
             "--dangerously-skip-permissions",
             "--add-dir", ".",
             "--model", agy_model,
