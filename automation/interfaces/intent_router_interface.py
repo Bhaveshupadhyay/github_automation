@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from automation.domain.models import TaskIntent
+from automation.domain import TaskIntent
 
 class IIntentRouterService(ABC):
     """Abstract interface for Intent Router services."""

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from automation.domain.models import GitPRDetails
+from automation.domain import GitPRDetails
 
 class IMetadataService(ABC):
     """Abstract interface defining contract for Git & PR metadata generation services."""

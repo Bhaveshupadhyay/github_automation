@@ -2,11 +2,12 @@ import json
 import logging
 import subprocess
 from typing import Optional
-from automation.domain.models import WorkflowEnvironment, GitPRDetails
+from automation.domain import WorkflowEnvironment, GitPRDetails
+from automation.interfaces.git_pr_interface import IGitPRService
 
 logger = logging.getLogger("automation.git_pr")
 
-class GitPRService:
+class GitPRService(IGitPRService):
     """Service responsible for executing Git commands and creating/updating Pull Requests."""
     
     def __init__(self, config: WorkflowEnvironment, pr_details: GitPRDetails):

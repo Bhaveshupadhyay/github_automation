@@ -1,19 +1,22 @@
 import json
 import logging
+import threading
 import urllib.request
 from typing import Dict, Any, Optional
-from automation.domain.models import WorkflowEnvironment, GitPRDetails, TaskIntent
+from automation.domain import WorkflowEnvironment, GitPRDetails, TaskIntent
+from automation.interfaces.notification_interface import INotificationService
 
 logger = logging.getLogger("automation.notification")
 
-class NotificationService:
-    """Service responsible for sending interactive notifications to Slack."""
+class NotificationService(INotificationService):
+    """Service responsible for sending interactive notifications to Slack asynchronously in non-blocking daemon threads."""
     
     def __init__(self, config: WorkflowEnvironment, pr_details: Optional[GitPRDetails] = None):
         self.config = config
         self.pr_details = pr_details
 
-    def _post_slack_payload(self, payload: Dict[str, Any]):
+    def _post_slack_payload_sync(self, payload: Dict[str, Any]):
+        """Synchronous HTTP worker method executed in a background daemon thread."""
         if not self.config.slack_token or not self.config.slack_channel:
             logger.info("ℹ️ Slack notification skipped (SLACK_TOKEN or SLACK_CHANNEL not set).")
             return
@@ -31,16 +34,28 @@ class NotificationService:
         )
 
         try:
-            with urllib.request.urlopen(req) as resp:
+            # Enforce strict 5-second HTTP timeout
+            with urllib.request.urlopen(req, timeout=5) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
                 if result.get("ok"):
                     logger.info("✅ Slack notification posted successfully!")
                 else:
                     logger.warning(f"⚠️ Slack API error: {result.get('error')}")
         except Exception as e:
-            logger.error(f"❌ Error sending Slack notification: {e}")
+            # Fail-safe: Notification failures log warnings and NEVER crash the pipeline
+            logger.warning(f"⚠️ Non-critical Slack notification skipped ({e}).")
 
-    def send_slack_notification(self, pr_url: str):
+    def _dispatch_async(self, payload: Dict[str, Any]):
+        """Dispatches notification payload in a non-blocking background daemon thread."""
+        thread = threading.Thread(
+            target=self._post_slack_payload_sync,
+            args=(payload,),
+            daemon=True,
+            name="SlackNotificationWorker"
+        )
+        thread.start()
+
+    def send_pr_notification(self, pr_url: str):
         payload = {
             "channel": self.config.slack_channel,
             "text": (
@@ -52,7 +67,11 @@ class NotificationService:
                 f"👀 Please review and merge when ready!"
             )
         }
-        self._post_slack_payload(payload)
+        self._dispatch_async(payload)
+
+    def send_slack_notification(self, pr_url: str):
+        """Backward-compatible alias for send_pr_notification."""
+        self.send_pr_notification(pr_url)
 
     def send_clarification_notification(self, intent: TaskIntent):
         question = intent.clarification_question or "Could you please provide missing required details to proceed?"
@@ -64,7 +83,7 @@ class NotificationService:
                 f"💬 *Please reply in this thread with the requested detail!*"
             )
         }
-        self._post_slack_payload(payload)
+        self._dispatch_async(payload)
 
     def send_deployment_notification(self, deploy_result: Dict[str, Any]):
         status_emoji = "✅" if deploy_result.get("success") else "❌"
@@ -79,4 +98,4 @@ class NotificationService:
                 f"📋 *Log Output:*\n```\n{deploy_result.get('output')}\n```"
             )
         }
-        self._post_slack_payload(payload)
+        self._dispatch_async(payload)
