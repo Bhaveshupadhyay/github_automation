@@ -9,14 +9,14 @@ from automation.interfaces.notification_interface import INotificationService
 logger = logging.getLogger("automation.notification")
 
 class NotificationService(INotificationService):
-    """Service responsible for sending interactive notifications to Slack asynchronously in non-blocking daemon threads."""
+    """Service responsible for sending interactive notifications to Slack asynchronously in non-blocking threads."""
     
     def __init__(self, config: WorkflowEnvironment, pr_details: Optional[GitPRDetails] = None):
         self.config = config
         self.pr_details = pr_details
 
     def _post_slack_payload_sync(self, payload: Dict[str, Any]):
-        """Synchronous HTTP worker method executed in a background daemon thread."""
+        """Synchronous HTTP worker method executed in a background thread."""
         if not self.config.slack_token or not self.config.slack_channel:
             logger.info("ℹ️ Slack notification skipped (SLACK_TOKEN or SLACK_CHANNEL not set).")
             return
@@ -46,14 +46,16 @@ class NotificationService(INotificationService):
             logger.warning(f"⚠️ Non-critical Slack notification skipped ({e}).")
 
     def _dispatch_async(self, payload: Dict[str, Any]):
-        """Dispatches notification payload in a non-blocking background daemon thread."""
+        """Dispatches notification payload in a thread and joins with a short timeout to ensure HTTP delivery."""
         thread = threading.Thread(
             target=self._post_slack_payload_sync,
             args=(payload,),
-            daemon=True,
+            daemon=False,
             name="SlackNotificationWorker"
         )
         thread.start()
+        # Wait up to 5 seconds for HTTP POST to finish before process termination
+        thread.join(timeout=5.0)
 
     def send_pr_notification(self, pr_url: str):
         payload = {

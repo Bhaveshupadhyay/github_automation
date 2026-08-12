@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import logging
 import subprocess
@@ -13,6 +14,7 @@ from automation.interfaces import (
     ISlackHistoryService,
     IGitPRService,
     INotificationService,
+    IExecutionOutputClassifierService,
 )
 from automation.services.cleanup_service import WorkspaceCleanupService
 
@@ -21,8 +23,7 @@ logger = logging.getLogger("automation.code_dev")
 class CodeDevelopmentService(ICodeDevelopmentService):
     """Dedicated service handling the end-to-end Code Development Pipeline using Constructor DI."""
     
-    def __init__(
-        self,
+    def __init__(self,
         config: WorkflowEnvironment,
         cleanup_service: WorkspaceCleanupService,
         slack_history_service: ISlackHistoryService,
@@ -30,6 +31,7 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         summarizer_service: ISummarizerService,
         git_pr_service_factory: Callable[[GitPRDetails], IGitPRService],
         notification_service_factory: Callable[[Optional[GitPRDetails]], INotificationService],
+        output_classifier: Optional[IExecutionOutputClassifierService] = None,
     ):
         self.config = config
         self.cleanup_service = cleanup_service
@@ -38,6 +40,7 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         self.summarizer_service = summarizer_service
         self.git_pr_service_factory = git_pr_service_factory
         self.notification_service_factory = notification_service_factory
+        self.output_classifier = output_classifier
 
     def _run_graphify(self, args: list) -> subprocess.CompletedProcess:
         """Helper executing graphify CLI via uv root project virtualenv or global binary."""
@@ -117,20 +120,20 @@ class CodeDevelopmentService(ICodeDevelopmentService):
 
         agy_full_output = "".join(agy_output_lines).strip()
 
-        # Step 6: Check for SpecialTags.CLARIFICATION_NEEDED tag in agy output
-        tag = SpecialTags.CLARIFICATION_NEEDED.value
-        if tag in agy_full_output:
-            question = agy_full_output.split(tag)[1].split("\n")[0].strip()
-            logger.info(f"❓ agy requested clarification: {question}")
-            clarification_intent = TaskIntent(
-                category=TaskCategory.CLARIFICATION_NEEDED,
-                confidence=1.0,
-                reasoning="Clarification requested by agy CLI engine.",
-                clarification_question=question
-            )
-            notifier = self.notification_service_factory(None)
-            notifier.send_clarification_notification(clarification_intent)
-            return
+        # Step 6: Evaluate agy CLI execution output intent semantically via injected classifier service
+        if self.output_classifier:
+            is_clarification, question = self.output_classifier.classify_output_intent(agy_full_output)
+            if is_clarification and question:
+                logger.info(f"❓ agy requested clarification (LLM Verified): {question}")
+                clarification_intent = TaskIntent(
+                    category=TaskCategory.CLARIFICATION_NEEDED,
+                    confidence=1.0,
+                    reasoning="Clarification requested by agy CLI engine.",
+                    clarification_question=question
+                )
+                notifier = self.notification_service_factory(None)
+                notifier.send_clarification_notification(clarification_intent)
+                return
 
         # Step 7: Clean up injected files before git staging
         self.cleanup_service.cleanup_unwanted_files()

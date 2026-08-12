@@ -1,25 +1,122 @@
 import os
 import re
+import json
 import logging
-from typing import Optional
+import urllib.request
+import urllib.error
+from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 from automation.domain.constants import DEFAULT_GEMINI_MODEL
 
 logger = logging.getLogger("automation.domain.environment")
 
+PROSE_SLASH_BLACKLIST = {
+    "documentation/instructions", "and/or", "true/false", "read/write", 
+    "input/output", "import/export", "client/server", "master/slave", 
+    "main/master", "ci/cd", "next.js/react"
+}
+
+
+def _get_api_key() -> str:
+    """Helper to retrieve Gemini API key without circular imports."""
+    for key_name in ("AGY_API_KEY", "GEMINI_API_KEY", "ANTIGRAVITY_API_KEY"):
+        val = os.getenv(key_name, "").strip()
+        if val:
+            return val
+    return ""
+
+
+def parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Resiliently extracts and parses JSON object from LLM response text."""
+    if not raw_text:
+        return None
+    text = raw_text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except Exception:
+                pass
+    return None
+
+
+def extract_target_repo_with_gemini(user_prompt: str) -> Optional[str]:
+    """Uses Gemini 3.1 Flash Lite REST API to extract target GitHub repository (owner/repo) semantically."""
+    api_key = _get_api_key()
+    if not api_key or not user_prompt.strip():
+        return None
+
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={api_key}"
+        system_instruction = (
+            "You are an expert GitHub repository extractor.\n"
+            "Analyze the user prompt and extract the target GitHub repository in 'owner/repo' format (e.g. 'bhaveshupadhyay/culture_box' or 'bhaveshupadhyay/edu-api').\n"
+            "CRITICAL RULE: Ignore general English prose containing slashes such as 'documentation/instructions', 'and/or', 'CI/CD', 'read/write', 'input/output'.\n"
+            "If no target GitHub repository is explicitly specified, respond with JSON: {\"target_repo\": null}."
+        )
+        payload = {
+            "contents": [{"parts": [{"text": f"{system_instruction}\n\nUser Prompt: {user_prompt}"}]}],
+            "generationConfig": {"response_mime_type": "application/json"}
+        }
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            candidates = data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    raw_text = parts[0].get("text", "").strip()
+                    parsed = parse_json_safely(raw_text)
+                    if parsed and isinstance(parsed, dict):
+                        target = parsed.get("target_repo")
+                        if target and "/" in target and target.lower() not in PROSE_SLASH_BLACKLIST:
+                            logger.info(f"🎯 Extracted Target Repo via Gemini 3.1 Flash Lite: '{target}'")
+                            return target.strip()
+    except Exception as e:
+        logger.debug(f"Gemini repo extraction exception: {e}")
+    return None
+
+
 def extract_target_repo(user_prompt: str, env_target: str) -> str:
-    """Extracts explicit owner/repo slug from user prompt if present. Returns empty string if no repo found."""
+    """Extracts explicit owner/repo slug from user prompt if present using Gemini + regex fallback."""
+    env_target_clean = env_target.strip() if env_target else ""
+
     if user_prompt:
-        # Strip full URLs to prevent URL fragments from misparsing
+        # 1. First try Gemini 3.1 Flash Lite semantic extraction
+        gemini_target = extract_target_repo_with_gemini(user_prompt)
+        if gemini_target:
+            return gemini_target
+
+        # 2. Fallback to Regex with Blacklist Filtering
         cleaned_prompt = re.sub(r"https?://[^\s]+", "", user_prompt)
         cleaned_prompt = re.sub(r"github\.com/[^\s]+", "", cleaned_prompt)
         
         matches = re.findall(r"\b([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)\b", cleaned_prompt)
         for slug in matches:
-            if not slug.lower().startswith("original"):
-                logger.info(f"🎯 Extracted explicit Target Repo '{slug}' from user prompt.")
+            slug_lower = slug.lower()
+            if slug_lower not in PROSE_SLASH_BLACKLIST and not slug_lower.startswith("original"):
+                logger.info(f"🎯 Extracted Target Repo via Regex Fallback: '{slug}'")
                 return slug
-    return env_target.strip() if env_target else ""
+
+    return env_target_clean
+
 
 class WorkflowEnvironment(BaseModel):
     """Pydantic domain model representing environment configuration passed from GitHub Actions."""
@@ -37,4 +134,8 @@ class WorkflowEnvironment(BaseModel):
     def __init__(self, **data):
         super().__init__(**data)
         env_target = os.getenv("TARGET_REPO", "")
-        self.target_repo = extract_target_repo(self.user_prompt, env_target)
+        # If preflight already validated TARGET_REPO in environment, preserve it
+        if "TARGET_REPO" in os.environ and env_target != "":
+            self.target_repo = env_target
+        else:
+            self.target_repo = extract_target_repo(self.user_prompt, env_target)

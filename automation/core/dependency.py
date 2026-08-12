@@ -13,6 +13,7 @@ from automation.interfaces import (
     INotificationService,
     ISlackHistoryService,
     IGitPRService,
+    IExecutionOutputClassifierService,
 )
 
 from automation.services.passthrough_intent_router_service import PassThroughIntentRouterService
@@ -25,6 +26,7 @@ from automation.services.cleanup_service import WorkspaceCleanupService
 from automation.services.git_pr_service import GitPRService
 from automation.services.slack_history_service import SlackHistoryService
 from automation.services.orchestration_service import TaskOrchestrationService
+from automation.services.gemini_execution_output_classifier_service import GeminiExecutionOutputClassifierService
 
 
 @lru_cache(maxsize=1)
@@ -57,6 +59,11 @@ def get_summarizer_service(config: Optional[WorkflowEnvironment] = None) -> ISum
     return GeminiLLMSummarizerService(cfg)
 
 
+def get_execution_output_classifier_service(config: Optional[WorkflowEnvironment] = None) -> IExecutionOutputClassifierService:
+    cfg = config or get_config()
+    return GeminiExecutionOutputClassifierService(cfg)
+
+
 def get_deployment_service(config: Optional[WorkflowEnvironment] = None) -> IDeploymentService:
     cfg = config or get_config()
     return DeploymentService(cfg)
@@ -82,6 +89,7 @@ def get_code_development_service(config: Optional[WorkflowEnvironment] = None) -
         summarizer_service=get_summarizer_service(cfg),
         git_pr_service_factory=lambda pr_details: get_git_pr_service(pr_details, cfg),
         notification_service_factory=lambda pr_details=None: get_notification_service(pr_details, cfg),
+        output_classifier=get_execution_output_classifier_service(cfg),
     )
 
 
