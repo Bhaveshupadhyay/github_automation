@@ -73,12 +73,13 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             graph_context = graph_res.stdout.strip()
             logger.info(f"🔍 Extracted Graphify AST Context ({len(graph_context)} chars).")
 
-        # Step 4: Inject Rules into workspace
-        rules_src = "../.agents/rules"
-        rules_dst = ".agents/rules"
-        if os.path.exists(rules_src):
-            os.makedirs(rules_dst, exist_ok=True)
-            subprocess.run(f"cp -r {rules_src}/* {rules_dst}/ 2>/dev/null || true", shell=True)
+        # Step 4: Non-destructively inject framework rules and skills into workspace
+        for agent_sub in ["rules", "skills"]:
+            src_dir = f"../.agents/{agent_sub}"
+            dst_dir = f".agents/{agent_sub}"
+            if os.path.exists(src_dir):
+                os.makedirs(dst_dir, exist_ok=True)
+                subprocess.run(f"cp -rn {src_dir}/* {dst_dir}/ 2>/dev/null || true", shell=True)
 
         # Step 5: Stream Execution of Native Google Antigravity CLI (agy) Engine in Current Directory '.'
         workspace_rule = "\n\nCRITICAL WORKSPACE RULE: You MUST modify and edit existing files ONLY inside the current working directory ('.'). Never create new subfolders in ~/.gemini/antigravity-cli/scratch or any external directory."

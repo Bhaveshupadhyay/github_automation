@@ -1,7 +1,6 @@
 import os
 import shutil
 import logging
-import subprocess
 
 logger = logging.getLogger("automation.cleanup")
 
@@ -10,8 +9,8 @@ class WorkspaceCleanupService:
     
     @staticmethod
     def cleanup_unwanted_files():
-        logger.info("🧹 Cleaning up injected .agents, rules, skills, and graphify files...")
-        unwanted_paths = [".agents", "graphify-out", "graphify_context.txt"]
+        logger.info("🧹 Cleaning up temporary graphify context and log files...")
+        unwanted_paths = ["graphify-out", "graphify_context.txt"]
         
         for path in unwanted_paths:
             if os.path.exists(path):
@@ -22,5 +21,3 @@ class WorkspaceCleanupService:
                         os.remove(path)
                     except OSError:
                         pass
-        
-        subprocess.run(["git", "checkout", "--", ".agents"], capture_output=True, text=True)
