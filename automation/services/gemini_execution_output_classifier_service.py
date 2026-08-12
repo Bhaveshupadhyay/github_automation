@@ -2,13 +2,38 @@ import json
 import logging
 import urllib.request
 import urllib.error
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, Any
 
 from automation.domain import WorkflowEnvironment
 from automation.interfaces.execution_output_classifier_interface import IExecutionOutputClassifierService
 from automation.core.credentials import get_gemini_api_key, normalize_gemini_model
 
 logger = logging.getLogger("automation.output_classifier")
+
+
+def parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Resiliently extracts and parses JSON object from LLM response text."""
+    if not raw_text:
+        return None
+    text = raw_text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except Exception:
+                pass
+    return None
 
 
 class GeminiExecutionOutputClassifierService(IExecutionOutputClassifierService):
@@ -57,13 +82,14 @@ class GeminiExecutionOutputClassifierService(IExecutionOutputClassifierService):
                     parts = candidates[0].get("content", {}).get("parts", [])
                     if parts:
                         raw_json = parts[0].get("text", "").strip()
-                        parsed = json.loads(raw_json)
-                        is_clarification = bool(parsed.get("is_clarification", False))
-                        question = str(parsed.get("question", "")).strip()
-                        
-                        if is_clarification and question:
-                            logger.info(f"❓ Gemini Output Classifier detected explicit clarification question: '{question}'")
-                            return True, question
+                        parsed = parse_json_safely(raw_json)
+                        if parsed and isinstance(parsed, dict):
+                            is_clarification = bool(parsed.get("is_clarification", False))
+                            question = str(parsed.get("question", "")).strip()
+                            
+                            if is_clarification and question:
+                                logger.info(f"❓ Gemini Output Classifier detected explicit clarification question: '{question}'")
+                                return True, question
         except Exception as e:
             logger.warning(f"⚠️ Exception in GeminiExecutionOutputClassifierService ({e}). Defaulting to COMPLETED task.")
 

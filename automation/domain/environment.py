@@ -4,7 +4,7 @@ import json
 import logging
 import urllib.request
 import urllib.error
-from typing import Optional
+from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 from automation.domain.constants import DEFAULT_GEMINI_MODEL
 
@@ -24,6 +24,31 @@ def _get_api_key() -> str:
         if val:
             return val
     return ""
+
+
+def parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Resiliently extracts and parses JSON object from LLM response text."""
+    if not raw_text:
+        return None
+    text = raw_text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except Exception:
+                pass
+    return None
 
 
 def extract_target_repo_with_gemini(user_prompt: str) -> Optional[str]:
@@ -58,11 +83,12 @@ def extract_target_repo_with_gemini(user_prompt: str) -> Optional[str]:
                 parts = candidates[0].get("content", {}).get("parts", [])
                 if parts:
                     raw_text = parts[0].get("text", "").strip()
-                    parsed = json.loads(raw_text)
-                    target = parsed.get("target_repo")
-                    if target and "/" in target and target.lower() not in PROSE_SLASH_BLACKLIST:
-                        logger.info(f"🎯 Extracted Target Repo via Gemini 3.1 Flash Lite: '{target}'")
-                        return target.strip()
+                    parsed = parse_json_safely(raw_text)
+                    if parsed and isinstance(parsed, dict):
+                        target = parsed.get("target_repo")
+                        if target and "/" in target and target.lower() not in PROSE_SLASH_BLACKLIST:
+                            logger.info(f"🎯 Extracted Target Repo via Gemini 3.1 Flash Lite: '{target}'")
+                            return target.strip()
     except Exception as e:
         logger.debug(f"Gemini repo extraction exception: {e}")
     return None
