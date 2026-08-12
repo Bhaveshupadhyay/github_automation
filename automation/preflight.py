@@ -16,6 +16,7 @@ def resolve_target_repo() -> str:
     user_prompt = os.getenv("USER_PROMPT", "").strip()
     payload_target = os.getenv("PAYLOAD_TARGET", "").strip()
     input_target = os.getenv("INPUT_TARGET", "").strip()
+    slack_thread_ts = os.getenv("SLACK_THREAD", "").strip()
     gh_token = os.getenv("GH_TOKEN", "").strip()
 
     logger.info("Resolving Target Repository for workflow execution...")
@@ -23,8 +24,8 @@ def resolve_target_repo() -> str:
     # Priority 1: Extract explicit target repository from prompt text (e.g. bhaveshupadhyay/culture_box)
     candidate_prompt_repo = extract_target_repo(user_prompt, "")
 
-    # If prompt is a thread clarification containing 'Previous Coding Request', inspect root message (Turn 1) first!
-    if not candidate_prompt_repo and "Previous Coding Request" in user_prompt:
+    # If prompt is a thread clarification (or slack_thread_ts is present), inspect root message (Turn 1) from Slack!
+    if not candidate_prompt_repo and slack_thread_ts:
         try:
             config = WorkflowEnvironment()
             history_service = SlackHistoryService(config)
@@ -43,7 +44,7 @@ def resolve_target_repo() -> str:
             logger.debug(f"Preflight Slack thread lookup exception: {e}")
 
     if candidate_prompt_repo:
-        logger.info(f"Candidate target repo found in prompt: '{candidate_prompt_repo}'")
+        logger.info(f"Candidate target repo found in prompt/thread: '{candidate_prompt_repo}'")
         if gh_token:
             try:
                 url = f"https://api.github.com/repos/{candidate_prompt_repo}"
@@ -76,12 +77,12 @@ def resolve_target_repo() -> str:
         logger.info(f"Using Manual Input Target Repository: '{input_target}'")
         return input_target
 
-    # Priority 3: Webhook payload target fallback
-    if payload_target:
+    # Priority 3: Webhook payload target fallback ONLY if request is NOT from a Slack thread
+    if payload_target and not slack_thread_ts:
         logger.info(f"Using Webhook Payload Target Repository: '{payload_target}'")
         return payload_target
 
-    logger.info("No target repository found in prompt, input, or payload.")
+    logger.info("No target repository found in prompt, thread history, or manual input.")
     return ""
 
 def main() -> None:

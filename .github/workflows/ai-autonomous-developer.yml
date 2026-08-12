@@ -69,6 +69,9 @@ jobs:
           USER_PROMPT: ${{ github.event.inputs.user_prompt || github.event.client_payload.user_prompt }}
           INPUT_TARGET: ${{ github.event.inputs.target_repo }}
           PAYLOAD_TARGET: ${{ github.event.client_payload.target_repo }}
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.inputs.slack_channel || github.event.client_payload.slack_channel }}
+          SLACK_THREAD: ${{ github.event.inputs.slack_thread_ts || github.event.client_payload.slack_thread_ts }}
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           uv run python -m automation.preflight
