@@ -43,7 +43,7 @@ class GitPRService(IGitPRService):
         subprocess.run(["git", "commit", "-m", self.pr_details.commit_message], check=True)
 
         remote_url = f"https://x-access-token:{self.config.gh_token}@github.com/{self.config.target_repo}.git"
-        subprocess.run(["git", "push", remote_url, self.pr_details.branch_name], check=True)
+        subprocess.run(["git", "push", "--force", remote_url, self.pr_details.branch_name], check=True)
 
     def create_pull_request(self) -> Optional[str]:
         # Check if a PR already exists for this branch
