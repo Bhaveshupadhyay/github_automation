@@ -15,7 +15,7 @@ from automation.interfaces import (
     IGitPRService,
 )
 
-from automation.services.gemini_intent_router_service import GeminiIntentRouterService
+from automation.services.passthrough_intent_router_service import PassThroughIntentRouterService
 from automation.services.gemini_metadata_service import GeminiLLMMetadataService
 from automation.services.gemini_summarizer_service import GeminiLLMSummarizerService
 from automation.services.code_development_service import CodeDevelopmentService
@@ -44,7 +44,7 @@ def get_slack_history_service(config: Optional[WorkflowEnvironment] = None) -> I
 
 def get_intent_router_service(config: Optional[WorkflowEnvironment] = None) -> IIntentRouterService:
     cfg = config or get_config()
-    return GeminiIntentRouterService(cfg)
+    return PassThroughIntentRouterService(cfg)
 
 
 def get_metadata_service(config: Optional[WorkflowEnvironment] = None) -> IMetadataService:
