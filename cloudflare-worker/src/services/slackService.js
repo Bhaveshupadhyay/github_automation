@@ -54,30 +54,41 @@ export class SlackService {
    */
   async fetchThreadParent(channel, threadTs) {
     if (!this.botToken) {
-      return { parentRepo: "", parentPrompt: "Previous Coding Request" };
+      return { parentRepo: "", parentPrompt: "" };
     }
 
     try {
+      const queryParams = new URLSearchParams({
+        channel: channel,
+        ts: threadTs,
+        limit: "10"
+      });
+
       const res = await fetch(
-        `https://slack.com/api/conversations.replies?channel=${channel}&ts=${threadTs}&limit=5`,
+        `https://slack.com/api/conversations.replies?${queryParams.toString()}`,
         { headers: { "Authorization": `Bearer ${this.botToken}` } }
       );
 
       const data = await res.json();
-      if (data.ok && data.messages && data.messages.length > 0) {
-        const parentText = data.messages[0].text || "";
-        const repoMatch = parentText.match(/Repo:\*\s*`([^`]+)`/);
-        const promptMatch = parentText.match(/Prompt:\*\s*`([^`]+)`/);
+      if (data.ok && Array.isArray(data.messages)) {
+        // Search through messages in the thread to find the context marker
+        for (const msg of data.messages) {
+          const text = msg.text || "";
+          const repoMatch = text.match(/Repo:\*\s*`([^`]+)`/);
+          const promptMatch = text.match(/Prompt:\*\s*`([^`]+)`/);
 
-        return {
-          parentRepo: repoMatch ? repoMatch[1] : "",
-          parentPrompt: promptMatch ? promptMatch[1] : "Previous Coding Request"
-        };
+          if (repoMatch || promptMatch) {
+            return {
+              parentRepo: repoMatch ? repoMatch[1] : "",
+              parentPrompt: promptMatch ? promptMatch[1] : "Previous Coding Request"
+            };
+          }
+        }
       }
     } catch (err) {
       console.error("[SlackService] Error fetching thread parent:", err);
     }
 
-    return { parentRepo: "", parentPrompt: "Previous Coding Request" };
+    return { parentRepo: "", parentPrompt: "" };
   }
 }

@@ -2,10 +2,10 @@
  * Service to handle GitHub Actions workflow dispatch triggers.
  */
 export class GithubService {
-  constructor(pat, owner, repoName) {
+  constructor(pat, owner = "bhaveshupadhyay", repoName = "github_automation") {
     this.pat = pat;
-    this.owner = owner || "bhaveshupadhyay";
-    this.repoName = repoName || "github_automation";
+    this.owner = owner;
+    this.repoName = repoName;
   }
 
   /**
@@ -28,7 +28,7 @@ export class GithubService {
       const res = await fetch(dispatchUrl, {
         method: "POST",
         headers: {
-          "Authorization": `token ${this.pat}`,
+          "Authorization": `Bearer ${this.pat}`,
           "Accept": "application/vnd.github.v3+json",
           "User-Agent": "Cloudflare-Worker-Antigravity"
         },
