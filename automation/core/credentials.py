@@ -8,10 +8,15 @@ logger = logging.getLogger("automation.credentials")
 
 def get_gemini_api_key() -> str:
     """Scans environment variables and local config for Gemini API key."""
-    env_key = os.getenv("AGY_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("ANTIGRAVITY_API_KEY", "").strip()
-    if env_key:
-        logger.info(f"🔑 Gemini API Key detected from environment (Length: {len(env_key)} chars).")
-        return env_key
+    for candidate in (
+        os.getenv("AGY_API_KEY"),
+        os.getenv("GEMINI_API_KEY"),
+        os.getenv("ANTIGRAVITY_API_KEY"),
+    ):
+        env_key = (candidate or "").strip()
+        if env_key:
+            logger.info(f"🔑 Gemini API Key detected from environment (Length: {len(env_key)} chars).")
+            return env_key
     
     creds_path = os.path.expanduser("~/.gemini/oauth_creds.json")
     if os.path.exists(creds_path):
@@ -19,9 +24,10 @@ def get_gemini_api_key() -> str:
             with open(creds_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict) and "api_key" in data and data["api_key"]:
-                    key = data["api_key"]
-                    logger.info(f"🔑 Gemini API Key detected from ~/.gemini/oauth_creds.json (Length: {len(key)} chars).")
-                    return key
+                    key = str(data["api_key"]).strip()
+                    if key:
+                        logger.info(f"🔑 Gemini API Key detected from ~/.gemini/oauth_creds.json (Length: {len(key)} chars).")
+                        return key
         except Exception:
             pass
             
