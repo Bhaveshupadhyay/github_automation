@@ -23,15 +23,22 @@ def resolve_target_repo() -> str:
     # Priority 1: Extract explicit target repository from prompt text (e.g. bhaveshupadhyay/culture_box)
     candidate_prompt_repo = extract_target_repo(user_prompt, "")
 
-    # If prompt is a thread clarification containing 'Previous Coding Request', query Slack Thread History for original prompt target repo!
+    # If prompt is a thread clarification containing 'Previous Coding Request', inspect root message (Turn 1) first!
     if not candidate_prompt_repo and "Previous Coding Request" in user_prompt:
         try:
             config = WorkflowEnvironment()
             history_service = SlackHistoryService(config)
-            fetched_history = history_service.fetch_thread_history()
-            if fetched_history:
-                logger.info("💬 Inspected Slack Thread History for original prompt target repo...")
-                candidate_prompt_repo = extract_target_repo(fetched_history, "")
+            
+            # Step A: Check Turn 1 (the initial root user message)
+            first_msg = history_service.fetch_first_message_text()
+            if first_msg:
+                candidate_prompt_repo = extract_target_repo(first_msg, "")
+                
+            # Step B: Fallback to full thread history if root message didn't contain target repo
+            if not candidate_prompt_repo:
+                fetched_history = history_service.fetch_thread_history()
+                if fetched_history:
+                    candidate_prompt_repo = extract_target_repo(fetched_history, "")
         except Exception as e:
             logger.debug(f"Preflight Slack thread lookup exception: {e}")
 
