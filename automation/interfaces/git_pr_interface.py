@@ -10,7 +10,7 @@ class IGitPRService(ABC):
         pass
 
     @abstractmethod
-    def create_and_push_branch(self) -> str:
+    def create_and_push_branch(self) -> None:
         """Creates branch and pushes local modifications."""
         pass
 

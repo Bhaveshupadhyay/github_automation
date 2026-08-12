@@ -80,8 +80,8 @@ def get_code_development_service(config: Optional[WorkflowEnvironment] = None) -
         slack_history_service=get_slack_history_service(cfg),
         metadata_service=get_metadata_service(cfg),
         summarizer_service=get_summarizer_service(cfg),
-        git_pr_service_factory=get_git_pr_service,
-        notification_service_factory=get_notification_service,
+        git_pr_service_factory=lambda pr_details: get_git_pr_service(pr_details, cfg),
+        notification_service_factory=lambda pr_details=None: get_notification_service(pr_details, cfg),
     )
 
 
@@ -92,5 +92,5 @@ def get_orchestration_service(config: Optional[WorkflowEnvironment] = None) -> I
         intent_router=get_intent_router_service(cfg),
         deployment_service=get_deployment_service(cfg),
         code_dev_service=get_code_development_service(cfg),
-        notification_service_factory=get_notification_service,
+        notification_service_factory=lambda pr_details=None: get_notification_service(pr_details, cfg),
     )
