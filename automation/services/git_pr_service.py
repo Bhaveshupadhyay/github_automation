@@ -32,9 +32,9 @@ class GitPRService:
         )
 
         if remote_check.stdout.strip():
-            logger.info(f"🔄 Branch '{self.pr_details.branch_name}' already exists remotely. Fetching and switching...")
+            logger.info(f"🔄 Branch '{self.pr_details.branch_name}' already exists remotely. Switching branch using -B...")
             subprocess.run(["git", "fetch", "origin", self.pr_details.branch_name], check=True)
-            subprocess.run(["git", "checkout", self.pr_details.branch_name], check=True)
+            subprocess.run(["git", "checkout", "-B", self.pr_details.branch_name], check=True)
         else:
             subprocess.run(["git", "checkout", "-b", self.pr_details.branch_name], check=True)
 
