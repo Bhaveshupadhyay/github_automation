@@ -110,7 +110,11 @@ jobs:
           if [ -z "$SLACK_THREAD" ]; then SLACK_THREAD="$PAYLOAD_SLACK_THREAD"; fi
 
           echo "target_repo=$RESOLVED_TARGET" >> $GITHUB_OUTPUT
-          echo "user_prompt=$PROMPT" >> $GITHUB_OUTPUT
+          {
+            echo "user_prompt<<EOF"
+            echo "$PROMPT"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
           echo "model=$MODEL_NAME" >> $GITHUB_OUTPUT
           echo "effort=$EFFORT_VAL" >> $GITHUB_OUTPUT
           echo "slack_channel=$SLACK_CHAN" >> $GITHUB_OUTPUT
