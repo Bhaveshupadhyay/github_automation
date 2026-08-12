@@ -2,23 +2,42 @@ import os
 import sys
 import logging
 import subprocess
-from typing import TYPE_CHECKING
+from typing import Callable, Optional
 
 from automation.domain.constants import SpecialTags, DEFAULT_AGY_MODEL
-from automation.domain.models import TaskIntent, TaskCategory
-from automation.interfaces.code_development_interface import ICodeDevelopmentService
-
-if TYPE_CHECKING:
-    from automation.dependency import Container
+from automation.domain import TaskIntent, TaskCategory, WorkflowEnvironment, GitPRDetails
+from automation.interfaces import (
+    ICodeDevelopmentService,
+    IMetadataService,
+    ISummarizerService,
+    ISlackHistoryService,
+    IGitPRService,
+    INotificationService,
+)
+from automation.services.cleanup_service import WorkspaceCleanupService
 
 logger = logging.getLogger("automation.code_dev")
 
 class CodeDevelopmentService(ICodeDevelopmentService):
-    """Dedicated service handling the end-to-end Code Development Pipeline."""
+    """Dedicated service handling the end-to-end Code Development Pipeline using Constructor DI."""
     
-    def __init__(self, container: "Container"):
-        self.container = container
-        self.config = container.config
+    def __init__(
+        self,
+        config: WorkflowEnvironment,
+        cleanup_service: WorkspaceCleanupService,
+        slack_history_service: ISlackHistoryService,
+        metadata_service: IMetadataService,
+        summarizer_service: ISummarizerService,
+        git_pr_service_factory: Callable[[GitPRDetails], IGitPRService],
+        notification_service_factory: Callable[[Optional[GitPRDetails]], INotificationService],
+    ):
+        self.config = config
+        self.cleanup_service = cleanup_service
+        self.slack_history_service = slack_history_service
+        self.metadata_service = metadata_service
+        self.summarizer_service = summarizer_service
+        self.git_pr_service_factory = git_pr_service_factory
+        self.notification_service_factory = notification_service_factory
 
     def _run_graphify(self, args: list) -> subprocess.CompletedProcess:
         """Helper executing graphify CLI via uv root project virtualenv or global binary."""
@@ -33,14 +52,12 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         logger.info("🛠️ Executing Code Development Pipeline (Graphify AST + agy Engine + Git Branch & PR)...")
 
         # Step 1: Clean up workspace unwanted files
-        cleanup_service = self.container.get_cleanup_service()
-        cleanup_service.cleanup_unwanted_files()
+        self.cleanup_service.cleanup_unwanted_files()
 
         # Step 2: Retrieve Full Slack Thread Conversation History if available
         thread_history = ""
         try:
-            history_service = self.container.get_slack_history_service()
-            fetched_history = history_service.fetch_thread_history()
+            fetched_history = self.slack_history_service.fetch_thread_history()
             if fetched_history:
                 thread_history = f"\n\n### Full Slack Conversation Thread History:\n{fetched_history}"
         except Exception as e:
@@ -108,23 +125,21 @@ class CodeDevelopmentService(ICodeDevelopmentService):
                 reasoning="Clarification requested by agy CLI engine.",
                 clarification_question=question
             )
-            notifier = self.container.get_notification_service()
+            notifier = self.notification_service_factory(None)
             notifier.send_clarification_notification(clarification_intent)
             return
 
         # Step 7: Clean up injected files before git staging
-        cleanup_service.cleanup_unwanted_files()
+        self.cleanup_service.cleanup_unwanted_files()
 
         # Step 8: Resolve Gemini LLM Metadata Service & Git PR Service
-        metadata_service = self.container.get_metadata_service()
-        pr_details = metadata_service.generate_metadata()
+        pr_details = self.metadata_service.generate_metadata()
 
-        git_service = self.container.get_git_pr_service(pr_details)
+        git_service = self.git_pr_service_factory(pr_details)
         if not git_service.has_changes():
             logger.info("ℹ️ No file changes were produced by the agent.")
             # Use decoupled ISummarizerService to summarize verbose CLI output into a clean 1-sentence question
-            summarizer_service = self.container.get_summarizer_service()
-            concise_question = summarizer_service.summarize_clarification(agy_full_output)
+            concise_question = self.summarizer_service.summarize_clarification(agy_full_output)
             
             logger.info(f"💬 Relaying concise clarification question to Slack thread: '{concise_question}'")
             clarification_intent = TaskIntent(
@@ -133,14 +148,14 @@ class CodeDevelopmentService(ICodeDevelopmentService):
                 reasoning="agy CLI output conversational response without code changes.",
                 clarification_question=concise_question
             )
-            notifier = self.container.get_notification_service()
+            notifier = self.notification_service_factory(None)
             notifier.send_clarification_notification(clarification_intent)
             return
 
         git_service.create_and_push_branch()
         pr_url = git_service.create_pull_request()
 
-        # Step 9: Post Slack notification
+        # Step 9: Post PR notification
         if pr_url:
-            notifier = self.container.get_notification_service(pr_details)
-            notifier.send_slack_notification(pr_url)
+            notifier = self.notification_service_factory(pr_details)
+            notifier.send_pr_notification(pr_url)

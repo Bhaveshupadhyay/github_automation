@@ -2,11 +2,12 @@ import os
 import logging
 import subprocess
 from typing import Dict, Any
-from automation.domain.models import WorkflowEnvironment, TaskIntent
+from automation.domain import WorkflowEnvironment, TaskIntent
+from automation.interfaces.deployment_interface import IDeploymentService
 
 logger = logging.getLogger("automation.deployment")
 
-class DeploymentService:
+class DeploymentService(IDeploymentService):
     """Service responsible for executing operational deployment tasks (Fastlane, Wrangler, GitHub Workflows)."""
     
     def __init__(self, config: WorkflowEnvironment):

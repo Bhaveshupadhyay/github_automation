@@ -5,7 +5,7 @@ import urllib.request
 import urllib.error
 from typing import Optional
 
-from automation.domain.models import extract_target_repo, WorkflowEnvironment
+from automation.domain import extract_target_repo, WorkflowEnvironment
 from automation.services.slack_history_service import SlackHistoryService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")

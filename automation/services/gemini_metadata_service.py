@@ -10,10 +10,10 @@ from typing import Optional
 from google import genai
 from google.genai import types
 
-from automation.domain.models import GitPRDetails, WorkflowEnvironment
+from automation.domain import GitPRDetails, WorkflowEnvironment
 from automation.domain.constants import SpecialTags
 from automation.interfaces.metadata_service_interface import IMetadataService
-from automation.utils.credentials import get_gemini_api_key, normalize_gemini_model
+from automation.core import get_gemini_api_key, normalize_gemini_model
 
 logger = logging.getLogger("automation.metadata")
 

@@ -3,9 +3,9 @@ import logging
 import urllib.request
 from typing import Optional
 
-from automation.domain.models import WorkflowEnvironment
+from automation.domain import WorkflowEnvironment
 from automation.interfaces.summarizer_interface import ISummarizerService
-from automation.utils.credentials import get_gemini_api_key, normalize_gemini_model
+from automation.core import get_gemini_api_key, normalize_gemini_model
 
 logger = logging.getLogger("automation.summarizer")
 

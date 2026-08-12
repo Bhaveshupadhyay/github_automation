@@ -1,19 +1,20 @@
-import json
 import logging
 import urllib.request
-from typing import Optional, List, Dict, Any
-from automation.domain.models import WorkflowEnvironment
+from typing import Optional, List
+from automation.domain import WorkflowEnvironment
+from automation.domain.slack import SlackMessage, SlackConversationsRepliesResponse
+from automation.interfaces.slack_history_interface import ISlackHistoryService
 
 logger = logging.getLogger("automation.slack_history")
 
-class SlackHistoryService:
+class SlackHistoryService(ISlackHistoryService):
     """Service to retrieve chronological conversation thread history from Slack API."""
     
     def __init__(self, config: WorkflowEnvironment):
         self.config = config
 
-    def fetch_thread_messages(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Single internal API entrypoint to fetch raw message dicts from Slack API."""
+    def fetch_thread_messages(self, limit: Optional[int] = None) -> List[SlackMessage]:
+        """Single internal API entrypoint to fetch typed SlackMessage models from Slack API."""
         token = self.config.slack_token
         channel = self.config.slack_channel
         thread_ts = self.config.slack_thread_ts
@@ -35,9 +36,12 @@ class SlackHistoryService:
 
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                if data.get("ok") and "messages" in data:
-                    return data["messages"]
+                raw_json = resp.read().decode("utf-8")
+                response_model = SlackConversationsRepliesResponse.model_validate_json(raw_json)
+                if response_model.ok:
+                    return response_model.messages
+                elif response_model.error:
+                    logger.warning(f"⚠️ Slack API returned error: {response_model.error}")
         except Exception as e:
             logger.warning(f"⚠️ Failed to fetch Slack messages: {e}")
 
@@ -47,7 +51,7 @@ class SlackHistoryService:
         """Returns Turn 1 (the initial root user message text) of the Slack thread."""
         messages = self.fetch_thread_messages(limit=1)
         if messages and len(messages) > 0:
-            first_msg = messages[0].get("text", "").strip()
+            first_msg = messages[0].text.strip()
             logger.info(f"💬 Retrieved root message from Slack thread {self.config.slack_thread_ts}: '{first_msg[:60]}...'")
             return first_msg
         return None
@@ -60,12 +64,12 @@ class SlackHistoryService:
 
         formatted_turns = []
         for msg in messages:
-            text = msg.get("text", "").strip()
+            text = msg.text.strip()
             if not text:
                 continue
             
             # Differentiate Human User vs AI Assistant Bot messages
-            if msg.get("bot_id") or msg.get("subtype") == "bot_message":
+            if msg.bot_id or msg.subtype == "bot_message":
                 role = "Assistant (AI)"
             else:
                 role = "User (Human)"
@@ -78,3 +82,4 @@ class SlackHistoryService:
             return history_str
 
         return None
+
