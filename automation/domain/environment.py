@@ -11,8 +11,9 @@ from automation.domain.constants import DEFAULT_GEMINI_MODEL
 logger = logging.getLogger("automation.domain.environment")
 
 PROSE_SLASH_BLACKLIST = {
-    "documentation/instructions", "and/or", "true/false", "read/write", 
-    "input/output", "import/export", "client/server", "master/slave", 
+    "documentation/instructions", "create/update", "add/update", "update/create",
+    "delete/remove", "pull/merge", "commit/push", "fetch/pull", "and/or", "true/false", 
+    "read/write", "input/output", "import/export", "client/server", "master/slave", 
     "main/master", "ci/cd", "next.js/react"
 }
 
@@ -62,7 +63,7 @@ def extract_target_repo_with_gemini(user_prompt: str) -> Optional[str]:
         system_instruction = (
             "You are an expert GitHub repository extractor.\n"
             "Analyze the user prompt and extract the target GitHub repository in 'owner/repo' format (e.g. 'bhaveshupadhyay/culture_box' or 'bhaveshupadhyay/edu-api').\n"
-            "CRITICAL RULE: Ignore general English prose containing slashes such as 'documentation/instructions', 'and/or', 'CI/CD', 'read/write', 'input/output'.\n"
+            "CRITICAL RULE: Ignore general English prose containing slashes such as 'documentation/instructions', 'create/update', 'add/update', 'and/or', 'CI/CD', 'read/write', 'input/output'.\n"
             "If no target GitHub repository is explicitly specified, respond with JSON: {\"target_repo\": null}."
         )
         payload = {
@@ -87,8 +88,9 @@ def extract_target_repo_with_gemini(user_prompt: str) -> Optional[str]:
                     if parsed and isinstance(parsed, dict):
                         target = parsed.get("target_repo")
                         if target and "/" in target and target.lower() not in PROSE_SLASH_BLACKLIST:
-                            logger.info(f"🎯 Extracted Target Repo via Gemini 3.1 Flash Lite: '{target}'")
-                            return target.strip()
+                            clean_target = target.strip().strip("'\"‘’“”")
+                            logger.info(f"🎯 Extracted Target Repo via Gemini 3.1 Flash Lite: '{clean_target}'")
+                            return clean_target
     except Exception as e:
         logger.debug(f"Gemini repo extraction exception: {e}")
     return None
@@ -96,7 +98,7 @@ def extract_target_repo_with_gemini(user_prompt: str) -> Optional[str]:
 
 def extract_target_repo(user_prompt: str, env_target: str) -> str:
     """Extracts explicit owner/repo slug from user prompt if present using Gemini + regex fallback."""
-    env_target_clean = env_target.strip() if env_target else ""
+    env_target_clean = env_target.strip().strip("'\"‘’“”") if env_target else ""
 
     if user_prompt:
         # 1. First try Gemini 3.1 Flash Lite semantic extraction
@@ -110,10 +112,11 @@ def extract_target_repo(user_prompt: str, env_target: str) -> str:
         
         matches = re.findall(r"\b([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)\b", cleaned_prompt)
         for slug in matches:
-            slug_lower = slug.lower()
+            slug_clean = slug.strip().strip("'\"‘’“”")
+            slug_lower = slug_clean.lower()
             if slug_lower not in PROSE_SLASH_BLACKLIST and not slug_lower.startswith("original"):
-                logger.info(f"🎯 Extracted Target Repo via Regex Fallback: '{slug}'")
-                return slug
+                logger.info(f"🎯 Extracted Target Repo via Regex Fallback: '{slug_clean}'")
+                return slug_clean
 
     return env_target_clean
 
@@ -133,7 +136,7 @@ class WorkflowEnvironment(BaseModel):
 
     def __init__(self, **data):
         super().__init__(**data)
-        env_target = os.getenv("TARGET_REPO", "")
+        env_target = os.getenv("TARGET_REPO", "").strip().strip("'\"‘’“”")
         # If preflight already validated TARGET_REPO in environment, preserve it
         if "TARGET_REPO" in os.environ and env_target != "":
             self.target_repo = env_target
