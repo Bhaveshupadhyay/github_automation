@@ -1,7 +1,55 @@
 /**
  * Cloudflare Worker for Slack Integration with Antigravity Engine (`agy`)
- * Supports Slash Commands, App Mentions, and Interactive Thread Clarifications.
+ * Supports Slash Commands, App Mentions, Fast-Path LLM Intent Routing, and Thread Clarifications.
+ * Built with Clean Architecture & Pluggable LLM Strategy Pattern.
  */
+
+import { IntentType } from "./src/types/intentTypes.js";
+import { createLlmProvider } from "./src/providers/llmFactory.js";
+import { IntentService } from "./src/services/intentService.js";
+import { SlackService } from "./src/services/slackService.js";
+import { GithubService } from "./src/services/githubService.js";
+
+const OWNER_REPO_REGEX = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/**
+ * Verifies Slack HMAC-SHA256 request signature.
+ */
+async function verifySlackSignature(request, rawBody, signingSecret) {
+  if (!signingSecret) return true; // Skip if signing secret not set in env
+
+  const timestamp = request.headers.get("x-slack-request-timestamp");
+  const slackSignature = request.headers.get("x-slack-signature");
+
+  if (!timestamp || !slackSignature) return false;
+
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - parseInt(timestamp, 10)) > 300) {
+    return false; // Request older than 5 minutes
+  }
+
+  const sigBaseString = `v0:${timestamp}:${rawBody}`;
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(signingSecret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(sigBaseString)
+  );
+
+  const hashHex = "v0=" + Array.from(new Uint8Array(signature))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  return hashHex === slackSignature;
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -13,12 +61,31 @@ export default {
       return new Response("Method not allowed", { status: 405 });
     }
 
+    const rawBody = await request.text();
+
+    // Verify Slack Request Signature
+    const isValid = await verifySlackSignature(request, rawBody, env.SLACK_SIGNING_SECRET);
+    if (!isValid) {
+      console.warn("Unauthorized request: Slack signature verification failed.");
+      return new Response("Unauthorized", { status: 401 });
+    }
+
     const contentType = request.headers.get("content-type") || "";
 
     try {
+      // Initialize Services (Dependency Injection)
+      const llmProvider = createLlmProvider(env);
+      const intentService = new IntentService(llmProvider);
+      const slackService = new SlackService(env.SLACK_BOT_TOKEN);
+      const githubService = new GithubService(
+        env.GITHUB_PAT,
+        env.WORKFLOW_REPO_OWNER,
+        env.WORKFLOW_REPO_NAME
+      );
+
       // 1. Handle Slack Slash Commands (application/x-www-form-urlencoded)
       if (contentType.includes("application/x-www-form-urlencoded")) {
-        const formData = await request.formData();
+        const formData = new URLSearchParams(rawBody);
         const text = formData.get("text") || "";
         const channelId = formData.get("channel_id") || env.SLACK_CHANNEL_ID;
         const userId = formData.get("user_id") || "";
@@ -27,16 +94,16 @@ export default {
           return new Response("Usage: `/code [owner/repo] <your prompt>`", { status: 200 });
         }
 
-        ctx.waitUntil(handleSlackCommand(text, channelId, userId, env));
+        ctx.waitUntil(handleCommandOrMention(text, channelId, userId, null, env, intentService, slackService, githubService));
 
-        return new Response("⚡ *Antigravity AI Agent Active!* Initializing execution on GitHub Actions...", {
+        return new Response("⚡ *Antigravity AI Agent Active!* Evaluating intent...", {
           headers: { "Content-Type": "text/plain" }
         });
       }
 
       // 2. Handle Slack Event Subscriptions (application/json)
       if (contentType.includes("application/json")) {
-        const payload = await request.json();
+        const payload = JSON.parse(rawBody);
 
         // Handle Slack URL Verification Challenge
         if (payload.type === "url_verification") {
@@ -50,21 +117,21 @@ export default {
         if (payload.type === "event_callback" && payload.event) {
           const event = payload.event;
           
-          // Ignore bot's own messages to prevent loops
+          // Ignore bot's own messages to prevent infinite loops
           if (event.bot_id || event.subtype === "bot_message") {
             return new Response("OK", { status: 200 });
           }
 
           // Case A: Thread Reply Clarification
           if (event.type === "message" && event.thread_ts && event.text) {
-            ctx.waitUntil(handleSlackThreadReply(event, env));
+            ctx.waitUntil(handleSlackThreadReply(event, env, slackService, githubService));
             return new Response("OK", { status: 200 });
           }
 
           // Case B: Direct App Mention (@bot [owner/repo] prompt)
           if (event.type === "app_mention" && event.text) {
             const cleanText = event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
-            ctx.waitUntil(handleSlackCommand(cleanText, event.channel, event.user, env, event.ts));
+            ctx.waitUntil(handleCommandOrMention(cleanText, event.channel, event.user, event.ts, env, intentService, slackService, githubService));
             return new Response("OK", { status: 200 });
           }
         }
@@ -72,154 +139,103 @@ export default {
 
       return new Response("Ignored", { status: 200 });
     } catch (err) {
+      console.error("Worker Execution Error:", err);
       return new Response(`Worker Error: ${err.message}`, { status: 500 });
     }
   }
 };
 
 /**
- * Dispatches GitHub Actions workflow for Slack Commands or App Mentions.
+ * Handles incoming user commands or app mentions with Fast-Path Intent Routing.
  */
-async function handleSlackCommand(text, channelId, userId, env, threadTs = null) {
+async function handleCommandOrMention(text, channelId, userId, threadTs, env, intentService, slackService, githubService) {
   const parts = text.trim().split(/\s+/);
   let repo = env.DEFAULT_GITHUB_REPO || "";
   let prompt = text.trim();
 
-  // Strict regex for owner/repo pattern (e.g., bhaveshupadhyay/hiphomboombox_backend)
-  const ownerRepoRegex = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-
-  if (parts.length > 1 && ownerRepoRegex.test(parts[0])) {
+  if (parts.length > 1 && OWNER_REPO_REGEX.test(parts[0])) {
     repo = parts[0];
     prompt = parts.slice(1).join(" ");
   }
 
   if (!repo) {
     console.error("No target repository configured or specified.");
+    await slackService.postMessage(channelId, "⚠️ *Error:* No target repository specified or configured.", threadTs);
     return;
   }
 
-  // 1. Post initial Slack message to establish thread context
-  let slackThreadTs = threadTs;
-  if (!slackThreadTs && env.SLACK_BOT_TOKEN) {
-    try {
-      const postRes = await fetch("https://slack.com/api/chat.postMessage", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          channel: channelId,
-          text: `🤖 *Antigravity AI Triggered*\n📦 *Repo:* \`${repo}\`\n📌 *Prompt:* \`${prompt}\`\n\n🧠 Initializing Antigravity Engine on GitHub Actions...`
-        })
-      });
-      const postData = await postRes.json();
-      if (postData.ok) {
-        slackThreadTs = postData.ts;
-      }
-    } catch (e) {
-      console.error("Failed to post initial Slack message:", e);
+  // Step 1: Fast-Path Intent Evaluation (< 500ms API call)
+  const { intent, question } = await intentService.evaluateIntent(repo, prompt);
+
+  let currentThreadTs = threadTs;
+
+  if (intent === IntentType.CLARIFICATION_NEEDED && question) {
+    console.log(`[Fast-Path] Clarification requested for repo ${repo}: ${question}`);
+    if (!currentThreadTs) {
+      currentThreadTs = await slackService.postMessage(
+        channelId,
+        `🤖 *Antigravity AI Request Received*\n📦 *Repo:* \`${repo}\`\n📌 *Prompt:* \`${prompt}\``
+      );
     }
+    await slackService.postMessage(
+      channelId,
+      `❓ *Antigravity AI Clarification:* ${question}`,
+      currentThreadTs
+    );
+    return;
   }
 
-  // 2. Dispatch GitHub Actions workflow event
-  await dispatchGitHubWorkflow(repo, prompt, channelId, slackThreadTs, env);
+  // Step 2: Intent is CODE_DEVELOPMENT -> Post status and trigger GitHub Action execution
+  if (!currentThreadTs) {
+    currentThreadTs = await slackService.postMessage(
+      channelId,
+      `🤖 *Antigravity AI Triggered*\n📦 *Repo:* \`${repo}\`\n📌 *Prompt:* \`${prompt}\`\n\n🧠 Initializing Antigravity Engine on GitHub Actions...`
+    );
+  }
+
+  const dispatched = await githubService.dispatchWorkflow(repo, prompt, channelId, currentThreadTs);
+  if (!dispatched) {
+    await slackService.postMessage(
+      channelId,
+      "❌ *Error:* Failed to start the GitHub Actions workflow. Check the worker logs or GITHUB_PAT configuration.",
+      currentThreadTs
+    );
+  }
 }
 
 /**
  * Handles Thread Replies when user replies with requested clarification.
  */
-async function handleSlackThreadReply(event, env) {
+async function handleSlackThreadReply(event, env, slackService, githubService) {
   const channelId = event.channel;
   const threadTs = event.thread_ts;
   const userReply = event.text;
 
   // Retrieve parent thread message context from Slack
-  let parentPrompt = "Previous Coding Request";
-  let targetRepo = env.DEFAULT_GITHUB_REPO || "";
-
-  if (env.SLACK_BOT_TOKEN) {
-    try {
-      const threadRes = await fetch(`https://slack.com/api/conversations.replies?channel=${channelId}&ts=${threadTs}&limit=5`, {
-        headers: { "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}` }
-      });
-      const threadData = await threadRes.json();
-      if (threadData.ok && threadData.messages && threadData.messages.length > 0) {
-        const parentMsg = threadData.messages[0].text || "";
-        const repoMatch = parentMsg.match(/Repo:\*\s*`([^`]+)`/);
-        if (repoMatch) {
-          targetRepo = repoMatch[1];
-        }
-        const promptMatch = parentMsg.match(/Prompt:\*\s*`([^`]+)`/);
-        if (promptMatch) {
-          parentPrompt = promptMatch[1];
-        }
-      }
-    } catch (e) {
-      console.error("Failed to fetch Slack thread replies:", e);
-    }
+  const { parentRepo, parentPrompt } = await slackService.fetchThreadParent(channelId, threadTs);
+  
+  // Strict check: Ignore non-bot thread replies that don't match an Antigravity AI thread
+  if (!parentRepo && !parentPrompt) {
+    return;
   }
 
+  const targetRepo = parentRepo || env.DEFAULT_GITHUB_REPO || "";
   const combinedPrompt = `Original Request: "${parentPrompt}". User Clarification: "${userReply}"`;
 
   // Inform thread that execution is resuming
-  if (env.SLACK_BOT_TOKEN) {
-    try {
-      await fetch("https://slack.com/api/chat.postMessage", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          channel: channelId,
-          thread_ts: threadTs,
-          text: `⚡ *Clarification Received!* Resuming Antigravity Engine execution with: \`${userReply}\`...`
-        })
-      });
-    } catch (e) {
-      console.error("Failed to post resuming Slack message:", e);
-    }
-  }
+  await slackService.postMessage(
+    channelId,
+    `⚡ *Clarification Received!* Resuming Antigravity Engine execution with: \`${userReply}\`...`,
+    threadTs
+  );
 
   // Dispatch resumed GitHub Action workflow event
-  await dispatchGitHubWorkflow(targetRepo, combinedPrompt, channelId, threadTs, env);
-}
-
-/**
- * Dispatches repository_dispatch API event to GitHub Actions with timeout and error handling.
- */
-async function dispatchGitHubWorkflow(repo, prompt, channelId, threadTs, env) {
-  const owner = env.WORKFLOW_REPO_OWNER || "bhaveshupadhyay";
-  const repoName = env.WORKFLOW_REPO_NAME || "github_automation";
-  const dispatchUrl = `https://api.github.com/repos/${owner}/${repoName}/dispatches`;
-  
-  try {
-    const res = await fetch(dispatchUrl, {
-      method: "POST",
-      headers: {
-        "Authorization": `token ${env.GITHUB_PAT}`,
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "Cloudflare-Worker-Antigravity"
-      },
-      body: JSON.stringify({
-        event_type: "ai_developer_task",
-        client_payload: {
-          target_repo: repo,
-          user_prompt: prompt,
-          slack_channel: channelId,
-          slack_thread_ts: threadTs
-        }
-      })
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error(`GitHub API dispatch failed (${res.status}): ${errText}`);
-    } else {
-      console.log(`Successfully dispatched GitHub workflow for target repo: ${repo}`);
-    }
-  } catch (err) {
-    console.error("Error dispatching GitHub workflow:", err);
+  const dispatched = await githubService.dispatchWorkflow(targetRepo, combinedPrompt, channelId, threadTs);
+  if (!dispatched) {
+    await slackService.postMessage(
+      channelId,
+      "❌ *Error:* Failed to dispatch resumed workflow to GitHub Actions.",
+      threadTs
+    );
   }
 }

@@ -1,9 +1,7 @@
 import os
-import sys
 import logging
 import urllib.request
 import urllib.error
-from typing import Optional
 
 from automation.domain import extract_target_repo, WorkflowEnvironment
 from automation.services.slack_history_service import SlackHistoryService
