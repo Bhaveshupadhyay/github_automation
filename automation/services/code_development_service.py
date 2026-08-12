@@ -78,8 +78,10 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             src_dir = f"../.agents/{agent_sub}"
             dst_dir = f".agents/{agent_sub}"
             if os.path.exists(src_dir):
-                os.makedirs(dst_dir, exist_ok=True)
-                subprocess.run(f"cp -rn {src_dir}/* {dst_dir}/ 2>/dev/null || true", shell=True)
+                try:
+                    shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+                except Exception as e:
+                    logger.debug(f"Copying {agent_sub} skipped: {e}")
 
         # Step 5: Stream Execution of Native Google Antigravity CLI (agy) Engine in Current Directory '.'
         workspace_rule = "\n\nCRITICAL WORKSPACE RULE: You MUST modify and edit existing files ONLY inside the current working directory ('.'). Never create new subfolders in ~/.gemini/antigravity-cli/scratch or any external directory."
