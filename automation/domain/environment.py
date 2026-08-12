@@ -11,8 +11,9 @@ from automation.domain.constants import DEFAULT_GEMINI_MODEL
 logger = logging.getLogger("automation.domain.environment")
 
 PROSE_SLASH_BLACKLIST = {
-    "documentation/instructions", "and/or", "true/false", "read/write", 
-    "input/output", "import/export", "client/server", "master/slave", 
+    "documentation/instructions", "create/update", "add/update", "update/create",
+    "delete/remove", "pull/merge", "commit/push", "fetch/pull", "and/or", "true/false", 
+    "read/write", "input/output", "import/export", "client/server", "master/slave", 
     "main/master", "ci/cd", "next.js/react"
 }
 
@@ -62,7 +63,7 @@ def extract_target_repo_with_gemini(user_prompt: str) -> Optional[str]:
         system_instruction = (
             "You are an expert GitHub repository extractor.\n"
             "Analyze the user prompt and extract the target GitHub repository in 'owner/repo' format (e.g. 'bhaveshupadhyay/culture_box' or 'bhaveshupadhyay/edu-api').\n"
-            "CRITICAL RULE: Ignore general English prose containing slashes such as 'documentation/instructions', 'and/or', 'CI/CD', 'read/write', 'input/output'.\n"
+            "CRITICAL RULE: Ignore general English prose containing slashes such as 'documentation/instructions', 'create/update', 'add/update', 'and/or', 'CI/CD', 'read/write', 'input/output'.\n"
             "If no target GitHub repository is explicitly specified, respond with JSON: {\"target_repo\": null}."
         )
         payload = {

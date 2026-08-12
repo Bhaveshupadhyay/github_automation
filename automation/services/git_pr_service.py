@@ -39,7 +39,7 @@ class GitPRService(IGitPRService):
         else:
             subprocess.run(["git", "checkout", "-b", self.pr_details.branch_name], check=True)
 
-        subprocess.run(["git", "add", "."], check=True)
+        subprocess.run(["git", "add", "."], check=False)
         subprocess.run(["git", "commit", "-m", self.pr_details.commit_message], check=True)
 
         remote_url = f"https://x-access-token:{self.config.gh_token}@github.com/{self.config.target_repo}.git"
