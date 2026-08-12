@@ -25,3 +25,6 @@ Thumbs.db
 # Workspace target build folders
 workspace_target/
 graphify-out/
+
+# Local-only Antigravity Skills
+.agents/skills/github-automation-context/
