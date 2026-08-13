@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 import subprocess
@@ -20,10 +21,16 @@ class GitPRService(IGitPRService):
         self.pr_details = pr_details
 
     def _exclude_instruction_files(self):
-        """Unstages and restores antigravity-instructions.md files so they are excluded from PR diffs."""
+        """Unstages and restores antigravity-instructions.md files so they are excluded from PR diffs on target repos."""
         for file_path in EXCLUDED_INSTRUCTION_FILES:
             subprocess.run(["git", "reset", "HEAD", "--", file_path], capture_output=True)
             subprocess.run(["git", "checkout", "--", file_path], capture_output=True)
+            # If working on an external target repository, ensure instruction files are cleaned up from working tree
+            if os.path.exists(file_path) and self.config.target_repo and "github_automation" not in self.config.target_repo.lower():
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
 
     def has_changes(self) -> bool:
         self._exclude_instruction_files()
