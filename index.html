@@ -3,67 +3,446 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AI Automated Deployment Portal</title>
+  <title>AutoPR Slack AI — Autonomous AI Developer Slackbot</title>
+  <meta name="description" content="Turn Slack messages into GitHub Pull Requests instantly using Google Antigravity AI Engine and Cloudflare Worker Edge." />
   <link rel="stylesheet" href="style.css"/>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Plus+Jakarta+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="background-glow"></div>
-  
+  <!-- Ambient Glow Effects -->
+  <div class="ambient-glow">
+    <div class="glow-orb-1"></div>
+    <div class="glow-orb-2"></div>
+    <div class="glow-orb-3"></div>
+  </div>
+
+  <!-- Navigation Bar -->
   <header class="navbar">
-    <div class="logo">
-      <span class="sparkle">✨</span> AutoGit AI
+    <div class="container nav-inner">
+      <a href="#" class="brand-logo">
+        <div class="brand-icon">
+          <!-- User Provided Slack SVG Image (Scaled Up) -->
+          <img src="slack.svg" width="28" height="28" alt="Slack Logo" />
+        </div>
+        <span>AutoPR <span class="gradient-accent-text">Slack AI</span></span>
+      </a>
+      
+      <ul class="nav-links">
+        <li><a href="#simulator">Live Sandbox</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#setup">Setup Guide</a></li>
+      </ul>
+
+      <div style="display: flex; gap: 0.8rem;">
+        <a href="https://github.com/bhaveshupadhyay/github_automation" target="_blank" class="btn btn-secondary">
+          <!-- Official GitHub SVG Logo -->
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          GitHub Repo
+        </a>
+        <a href="#setup" class="btn btn-slack">
+          <!-- User Provided Slack SVG Image -->
+          <img src="slack.svg" width="22" height="22" alt="Slack Logo" />
+          Add to Slack
+        </a>
+      </div>
     </div>
-    <nav>
-      <a href="#features">Features</a>
-      <a href="#architecture">Architecture</a>
-      <a href="https://github.com" target="_blank" class="btn-github">GitHub Repo</a>
-    </nav>
   </header>
 
-  <main class="hero-container">
-    <div class="badge">🤖 100% Autonomous Telegram Bot -> GitHub -> Deploy</div>
-    <h1>Telegram AI Autonomous Developer</h1>
-    <p class="subtitle">
-      Message your Telegram Bot from anywhere. Gemini AI inspects your code, writes the changes, opens a PR, auto-merges, and deploys live in seconds!
-    </p>
-
-    <div class="status-card">
-      <div class="status-header">
-        <span class="indicator active"></span>
-        <span class="status-text">System Status: <strong>Ready for Telegram Prompts</strong></span>
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">
+        <span class="pulse-dot"></span>
+        <div class="logo-strip">
+          <!-- Slack -->
+          <img src="slack.svg" width="22" height="22" alt="Slack Logo" />
+          <!-- Cloudflare -->
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#F38020">
+            <path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/>
+          </svg>
+          <!-- Antigravity -->
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="#c084fc"/>
+          </svg>
+          <!-- GitHub -->
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+        </div>
+        <span>Slack ➔ Cloudflare ➔ Google Antigravity ➔ GitHub PR</span>
       </div>
-      <div class="command-box">
-        <code>/code Add dark mode toggle and dynamic quote widget</code>
-        <button id="copyBtn" onclick="copyCommand()">Copy Command</button>
-      </div>
-    </div>
-  </main>
 
-  <section id="features" class="grid-section">
-    <div class="card">
-      <div class="icon">📱</div>
-      <h3>Telegram Control</h3>
-      <p>Send prompts directly from Telegram on mobile or desktop without opening an IDE.</p>
-    </div>
-    <div class="card">
-      <div class="icon">🧠</div>
-      <h3>Gemini AI Engine</h3>
-      <p>Powered by Google Gemini 2.0 Flash API (Free Tier) for lightning-fast code generation.</p>
-    </div>
-    <div class="card">
-      <div class="icon">🔀</div>
-      <h3>Auto PR & Merge</h3>
-      <p>Creates dedicated feature branches, generates pull requests, and auto-merges cleanly.</p>
-    </div>
-    <div class="card">
-      <div class="icon">🚀</div>
-      <h3>Instant Deployment</h3>
-      <p>Triggers Vercel, Netlify, or GitHub Pages builds automatically upon main branch merge.</p>
+      <h1 class="gradient-text">
+        Turn Slack Queries Into GitHub Pull Requests
+      </h1>
+      <p class="lead">
+        Type <code class="slack-cmd">/code Add Redis caching to get_user_profile</code> directly in Slack. Our autonomous AI developer inspects your codebase, writes precision diffs, passes tests, and opens a clean GitHub PR in seconds.
+      </p>
+
+      <div class="hero-cta">
+        <a href="#simulator" class="btn btn-primary">
+          Try Live Simulator
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </a>
+        <a href="#architecture" class="btn btn-secondary">
+          View Architecture
+        </a>
+      </div>
     </div>
   </section>
+
+  <!-- Interactive Slack Sandbox Simulator -->
+  <section id="simulator" class="demo-section">
+    <div class="container">
+      <div class="section-header">
+        <h2>Live Slackbot Simulator</h2>
+        <p>Select a sample prompt below or type your own to simulate the real-time Slack to GitHub PR workflow.</p>
+      </div>
+
+      <div class="slack-window">
+        <!-- Window Top Bar -->
+        <div class="slack-header">
+          <div class="slack-header-left">
+            <div class="window-controls">
+              <div class="window-dot dot-red"></div>
+              <div class="window-dot dot-yellow"></div>
+              <div class="window-dot dot-green"></div>
+            </div>
+            <div class="channel-title">
+              <span># dev-team</span>
+            </div>
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-dim);">
+            AutoPR Slack App v2.4 (Active)
+          </div>
+        </div>
+
+        <!-- Slack Messages Body -->
+        <div class="slack-body">
+          <div class="messages-list" id="chatList">
+            <!-- Initial User Prompt Message -->
+            <div class="message-item">
+              <div class="avatar avatar-user">B</div>
+              <div class="msg-content">
+                <div class="msg-header">
+                  <span class="sender-name">Bhavesh</span>
+                  <span class="msg-time">Today at 10:14 AM</span>
+                </div>
+                <div class="msg-text">
+                  <span class="slack-cmd">/code Fix race condition in authentication token refresh</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bot Response Thread Message -->
+            <div class="message-item">
+              <div class="avatar avatar-bot">
+                <!-- User Provided Slack SVG Image -->
+                <img src="slack.svg" width="30" height="30" alt="Slack Logo" />
+              </div>
+              <div class="msg-content">
+                <div class="msg-header">
+                  <span class="sender-name">AutoPR AI Bot</span>
+                  <span class="bot-tag">APP</span>
+                  <span class="msg-time">Today at 10:14 AM</span>
+                </div>
+                <div class="msg-text">
+                  🤖 Received request! Dispatching to <strong>Antigravity Engine (`agy`)</strong> on GitHub Actions...
+                </div>
+
+                <div class="slack-attachment">
+                  <div class="attachment-title">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                      <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                    GitHub Pull Request Created
+                  </div>
+                  <div style="font-size: 0.9rem; color: var(--text-muted);">
+                    <strong>Branch:</strong> <code style="color: #c084fc;">fix/auth-token-race-condition</code><br>
+                    <strong>PR #148:</strong> <a href="#" style="color: #38bdf8; text-decoration: none;">Fix race condition in token refresh logic</a>
+                  </div>
+                  <div class="diff-preview">
+                    <span class="diff-info">--- a/src/auth.py</span><br>
+                    <span class="diff-info">+++ b/src/auth.py</span><br>
+                    <span class="diff-del">- token = self._fetch_token_sync()</span><br>
+                    <span class="diff-add">+ async with self._refresh_lock:</span><br>
+                    <span class="diff-add">+     token = await self._fetch_token_async()</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Simulator Control Bar -->
+        <div class="simulator-bar">
+          <div class="prompt-chips">
+            <span class="chip-label">Try Example Prompts:</span>
+            <button type="button" class="chip" onclick="runPrompt('/code Add Redis caching to get_user_profile endpoint')">/code Add Redis caching</button>
+            <button type="button" class="chip" onclick="runPrompt('/code Add dark mode toggle in navbar')">/code Add dark mode toggle</button>
+            <button type="button" class="chip" onclick="runPrompt('/code Write pytest unit tests for webhook payload handler')">/code Write pytest unit tests</button>
+          </div>
+
+          <div class="input-box-wrapper">
+            <input type="text" id="slackInput" class="slack-input" placeholder="Type a Slack slash command (e.g. /code Add caching)..." value="/code Add Redis caching to get_user_profile" />
+            <button class="btn btn-primary" onclick="submitPrompt()">
+              Send Command
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Key Features Grid Section -->
+  <section id="features" class="features-section">
+    <div class="container">
+      <div class="section-header">
+        <h2>Built for High-Velocity Dev Teams</h2>
+        <p>Everything you need to turn instant chat prompts into production-ready code pull requests.</p>
+      </div>
+
+      <div class="grid-cards">
+        <div class="feature-card">
+          <div class="icon-wrapper icon-wrapper-slack">
+            <!-- Prominently Scaled Slack SVG -->
+            <img src="slack.svg" width="40" height="40" alt="Slack Logo" />
+          </div>
+          <h3>Slack & Telegram Native</h3>
+          <p>Send prompts straight from mobile or desktop messaging apps without ever switching contexts or opening your IDE.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="icon-wrapper icon-wrapper-cloudflare">
+            <!-- Cloudflare Logo -->
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="#F38020">
+              <path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/>
+            </svg>
+          </div>
+          <h3>Serverless Cloudflare Edge</h3>
+          <p>Instant HTTP webhook handling via Cloudflare Workers for sub-millisecond initial dispatch and response formatting.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="icon-wrapper icon-wrapper-antigravity">
+            <!-- Antigravity AI Sparkle Gem -->
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="url(#antigravity-card-grad)"/>
+              <defs>
+                <linearGradient id="antigravity-card-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#c084fc"/>
+                  <stop offset="1" stop-color="#818cf8"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <h3>Google Antigravity (`agy`) Core</h3>
+          <p>Multi-Agent reasoning with AST code parsing and zero API token costs on your Google Pro account.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="icon-wrapper icon-wrapper-github">
+            <!-- GitHub Logo -->
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="#ffffff">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+            </svg>
+          </div>
+          <h3>Autonomous PR Generation</h3>
+          <p>Creates isolated Git feature branches, runs test suites, and generates clear PR summaries ready for team review.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="icon-wrapper">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+            </svg>
+          </div>
+          <h3>Graphify Code Indexing</h3>
+          <p>Integrates Graphify AST code indexing to inspect deep file dependencies before generating surgical code changes.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="icon-wrapper">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+          </div>
+          <h3>Enterprise Runner Security</h3>
+          <p>Executes safely in GitHub Actions runner VMs with zero persistent state exposure outside your private repository.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Architecture Flowchart Section with Prominently Scaled Logos -->
+  <section id="architecture" class="architecture-section">
+    <div class="container">
+      <div class="section-header">
+        <h2>End-to-End Pipeline Architecture</h2>
+        <p>How a single Slack prompt moves through serverless edge workers to autonomous GitHub Actions execution.</p>
+      </div>
+
+      <div class="flow-diagram">
+        <!-- Step 1: Slack -->
+        <div class="flow-step">
+          <div class="flow-number">1</div>
+          <div class="flow-logo-badge badge-slack">
+            <!-- Prominently Scaled Slack SVG (48px) -->
+            <img src="slack.svg" width="48" height="48" alt="Slack Logo" />
+          </div>
+          <h4>Slack Prompt</h4>
+          <p>User sends <code>/code</code> command in Slack or Telegram thread.</p>
+        </div>
+
+        <div class="flow-arrow">➔</div>
+
+        <!-- Step 2: Cloudflare -->
+        <div class="flow-step">
+          <div class="flow-number">2</div>
+          <div class="flow-logo-badge badge-cloudflare">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="#F38020">
+              <path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/>
+            </svg>
+          </div>
+          <h4>Cloudflare Edge</h4>
+          <p>Worker verifies signature and dispatches <code>repository_dispatch</code> event to GitHub.</p>
+        </div>
+
+        <div class="flow-arrow">➔</div>
+
+        <!-- Step 3: Antigravity Engine -->
+        <div class="flow-step">
+          <div class="flow-number">3</div>
+          <div class="flow-logo-badge badge-antigravity">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="url(#antigravity-flow-grad)"/>
+              <defs>
+                <linearGradient id="antigravity-flow-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#c084fc"/>
+                  <stop offset="1" stop-color="#818cf8"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <h4>Antigravity Engine (`agy`)</h4>
+          <p>GitHub Actions VM restores OAuth Pro auth, parses codebase AST, and writes diffs.</p>
+        </div>
+
+        <div class="flow-arrow">➔</div>
+
+        <!-- Step 4: GitHub -->
+        <div class="flow-step">
+          <div class="flow-number">4</div>
+          <div class="flow-logo-badge badge-github">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="#ffffff">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+            </svg>
+          </div>
+          <h4>GitHub PR & Deploy</h4>
+          <p>Opens PR, runs test suite, and posts updates back to Slack thread.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Setup Guide Section -->
+  <section id="setup" class="setup-section">
+    <div class="container">
+      <div class="section-header">
+        <h2>Quick Deployment Guide</h2>
+        <p>Get your Slackbot Autonomous Developer running in under 5 minutes.</p>
+      </div>
+
+      <div class="setup-box">
+        <div class="setup-tabs">
+          <button class="tab-btn active" onclick="openTab(event, 'tab-cloudflare')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#F38020"><path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/></svg>
+            1. Cloudflare Worker
+          </button>
+          <button class="tab-btn" onclick="openTab(event, 'tab-slack')">
+            <img src="slack.svg" width="22" height="22" alt="Slack Logo" />
+            2. Slack Slash Command
+          </button>
+          <button class="tab-btn" onclick="openTab(event, 'tab-github')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+            3. GitHub Secrets
+          </button>
+        </div>
+
+        <div class="setup-content">
+          <!-- Tab 1: Cloudflare -->
+          <div id="tab-cloudflare" class="tab-pane active">
+            <h3>Deploy Cloudflare Worker Edge</h3>
+            <p style="color: var(--text-muted); margin-top: 0.5rem;">
+              Deploy the serverless worker to handle Slack webhooks and forward commands to GitHub Actions.
+            </p>
+            <div class="code-block">
+              <code>cd cloudflare-worker && wrangler deploy</code>
+              <button class="copy-btn" onclick="copyCode('cd cloudflare-worker && wrangler deploy', event)">Copy</button>
+            </div>
+            <div class="code-block" style="margin-top: 0.75rem;">
+              <code>wrangler secret put GITHUB_PAT && wrangler secret put SLACK_BOT_TOKEN</code>
+              <button class="copy-btn" onclick="copyCode('wrangler secret put GITHUB_PAT && wrangler secret put SLACK_BOT_TOKEN', event)">Copy</button>
+            </div>
+          </div>
+
+          <!-- Tab 2: Slack -->
+          <div id="tab-slack" class="tab-pane">
+            <h3>Configure Slack Slash Command</h3>
+            <p style="color: var(--text-muted); margin-top: 0.5rem;">
+              In your Slack App Settings, navigate to <strong>Slash Commands</strong> and click <strong>Create New Command</strong>.
+            </p>
+            <ul style="color: var(--text-muted); margin: 1rem 0 0 1.5rem; line-height: 1.8;">
+              <li><strong>Command:</strong> <code style="color: #38bdf8;">/code</code></li>
+              <li><strong>Request URL:</strong> <code style="color: #38bdf8;">https://github-automation.&lt;your-subdomain&gt;.workers.dev</code></li>
+              <li><strong>Short Description:</strong> Trigger Autonomous AI Developer</li>
+            </ul>
+          </div>
+
+          <!-- Tab 3: GitHub -->
+          <div id="tab-github" class="tab-pane">
+            <h3>Add GitHub Repository Secrets</h3>
+            <p style="color: var(--text-muted); margin-top: 0.5rem;">
+              Configure secrets in your target GitHub repository (<strong>Settings → Secrets and variables → Actions</strong>):
+            </p>
+            <div class="code-block">
+              <code>AGY_AUTH_CONFIG = Base64(~/.gemini/config)</code>
+              <button class="copy-btn" onclick="copyCode('cat ~/.gemini/config | base64', event)">Copy Cmd</button>
+            </div>
+            <div class="code-block" style="margin-top: 0.75rem;">
+              <code>PAT_TOKEN = GitHub Personal Access Token with repo scope</code>
+              <button class="copy-btn" onclick="copyCode('PAT_TOKEN', event)">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div>
+        <strong>AutoPR Slack AI</strong> — Serverless Autonomous AI Developer Setup
+        <div style="font-size: 0.85rem; margin-top: 0.3rem;">
+          Engineered with Slack, Cloudflare Workers, Google Antigravity Engine (`agy`), & GitHub Actions.
+        </div>
+      </div>
+
+      <div class="status-indicator">
+        <span class="status-dot"></span>
+        <span>Systems Operational • Cloudflare Edge Active</span>
+      </div>
+    </div>
+  </footer>
 
   <script src="app.js"></script>
 </body>
