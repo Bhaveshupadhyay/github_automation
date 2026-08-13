@@ -1,30 +1,30 @@
-# ⚡ AutoPR Slack AI — Serverless Autonomous AI Developer
+# AutoPR Slack AI — Serverless Autonomous AI Developer
 
 An enterprise, serverless AI developer pipeline triggered directly from **Slack** or **Telegram** via **Cloudflare Workers**, executing **Google Antigravity Engine (`agy`)** inside **GitHub Actions** with zero API costs using your Google Pro session authentication.
 
 ---
 
-## 🎬 Product Launch Video
+## Product Launch Video
 
 <video src="product_demo/brag.mp4" controls width="100%" poster="product_demo/brag.jpg"></video>
 
-> 📹 **Launch Video File:** [`product_demo/brag.mp4`](product_demo/brag.mp4)  
-> 🖼️ **Poster Thumbnail:** [`product_demo/brag.jpg`](product_demo/brag.jpg)
+> **Launch Video File:** [`product_demo/brag.mp4`](product_demo/brag.mp4)  
+> **Poster Thumbnail:** [`product_demo/brag.jpg`](product_demo/brag.jpg)
 
 ---
 
-## 🌟 Interactive Landing Page & Sandbox
+## Interactive Landing Page & Sandbox
 
 This repository includes a dark-mode landing page and real-time interactive Slackbot simulator (`index.html`, `style.css`, `app.js`).
 
 ### Features:
-- 💬 **Live Slack Slash Command Simulator**: Test prompts (`/code Add Redis caching`) and view simulated PR diffs in real-time.
-- ⚡ **Architecture Flowchart**: Step-by-step visual of Slack → Cloudflare Worker → GitHub Actions (`agy`) → PR Created.
-- 📋 **Quick Deployment Tabs**: Copy-paste deployment snippets for Cloudflare Wrangler, Slack Slash Commands, and GitHub Secrets.
+- **Live Slack Slash Command Simulator**: Test prompts (`/code Add Redis caching`) and view simulated PR diffs in real-time.
+- **Architecture Flowchart**: Step-by-step visual of Slack → Cloudflare Worker → GitHub Actions (`agy`) → PR Created.
+- **Quick Deployment Tabs**: Copy-paste deployment snippets for Cloudflare Wrangler, Slack Slash Commands, and GitHub Secrets.
 
 ---
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
 ```text
 [ Slack / Telegram ] 
@@ -43,7 +43,7 @@ This repository includes a dark-mode landing page and real-time interactive Slac
 
 ---
 
-## 🔑 Required Secrets Setup
+## Required Secrets Setup
 
 ### 1. GitHub Repository Secrets (`github_automation`)
 
@@ -64,7 +64,7 @@ This repository includes a dark-mode landing page and real-time interactive Slac
 
 ---
 
-## 💬 Usage
+## Usage
 
 Send a slash command in Slack or Telegram:
 
