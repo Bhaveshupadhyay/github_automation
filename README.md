@@ -4,6 +4,17 @@ An enterprise, serverless AI developer pipeline triggered directly from **Slack*
 
 ---
 
+## 🎬 Product Launch Video
+
+![AutoPR Slack AI Launch Video](/Users/bhaveshupadhyay/IdeaProjects/github_automation/brag-output-2026-08-13-055130/brag.mp4)
+
+<video src="/Users/bhaveshupadhyay/IdeaProjects/github_automation/brag-output-2026-08-13-055130/brag.mp4" controls width="100%" poster="/Users/bhaveshupadhyay/IdeaProjects/github_automation/brag-output-2026-08-13-055130/brag.jpg"></video>
+
+> 📹 **Launch Video File:** [`brag-output-2026-08-13-055130/brag.mp4`](file:///Users/bhaveshupadhyay/IdeaProjects/github_automation/brag-output-2026-08-13-055130/brag.mp4)  
+> 🖼️ **Poster Thumbnail:** [`brag-output-2026-08-13-055130/brag.jpg`](file:///Users/bhaveshupadhyay/IdeaProjects/github_automation/brag-output-2026-08-13-055130/brag.jpg)
+
+---
+
 ## 🌟 Interactive Landing Page & Sandbox
 
 This repository includes a dark-mode landing page and real-time interactive Slackbot simulator (`index.html`, `style.css`, `app.js`).
