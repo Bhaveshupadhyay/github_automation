@@ -120,12 +120,14 @@ h1, h2, h3, h4 {
 
 .gradient-text {
   background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 50%, #818cf8 100%);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .gradient-accent-text {
   background: linear-gradient(135deg, #818cf8 0%, #c084fc 50%, #34d399 100%);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -375,6 +377,8 @@ h1, h2, h3, h4 {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  max-height: 420px;
+  overflow-y: auto;
 }
 
 .message-item {

@@ -4,6 +4,16 @@
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('AutoPR Slack AI Portal loaded.');
+
+  const input = document.getElementById('slackInput');
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        submitPrompt();
+      }
+    });
+  }
 });
 
 // Interactive Slack Simulator Logic
@@ -22,6 +32,9 @@ function submitPrompt() {
 
   const promptText = input.value.trim();
   if (!promptText) return;
+
+  // Clear input box after reading
+  input.value = '';
 
   const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -164,22 +177,30 @@ function openTab(evt, tabName) {
   }
 
   document.getElementById(tabName).classList.add('active');
-  evt.currentTarget.classList.add('active');
+  if (evt && evt.currentTarget) {
+    evt.currentTarget.classList.add('active');
+  }
 }
 
 // One-Click Code Copier
-function copyCode(text) {
+function copyCode(text, evt) {
+  const btn = (evt && evt.currentTarget) ? evt.currentTarget : (event ? event.target : null);
+  if (!navigator.clipboard) return;
+
   navigator.clipboard.writeText(text).then(() => {
-    const btn = event.target;
-    const origText = btn.textContent;
-    btn.textContent = 'Copied! ✓';
-    btn.style.background = '#10b981';
-    btn.style.borderColor = '#10b981';
-    setTimeout(() => {
-      btn.textContent = origText;
-      btn.style.background = '';
-      btn.style.borderColor = '';
-    }, 2000);
+    if (btn) {
+      const origText = btn.textContent;
+      btn.textContent = 'Copied! ✓';
+      btn.style.background = '#10b981';
+      btn.style.borderColor = '#10b981';
+      setTimeout(() => {
+        btn.textContent = origText;
+        btn.style.background = '';
+        btn.style.borderColor = '';
+      }, 2000);
+    }
+  }).catch(err => {
+    console.error('Failed to copy to clipboard:', err);
   });
 }
 

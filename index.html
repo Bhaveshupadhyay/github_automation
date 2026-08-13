@@ -186,9 +186,9 @@
         <div class="simulator-bar">
           <div class="prompt-chips">
             <span class="chip-label">Try Example Prompts:</span>
-            <span class="chip" onclick="runPrompt('/code Add Redis caching to get_user_profile endpoint')">/code Add Redis caching</span>
-            <span class="chip" onclick="runPrompt('/code Add dark mode toggle in navbar')">/code Add dark mode toggle</span>
-            <span class="chip" onclick="runPrompt('/code Write pytest unit tests for webhook payload handler')">/code Write pytest unit tests</span>
+            <button type="button" class="chip" onclick="runPrompt('/code Add Redis caching to get_user_profile endpoint')">/code Add Redis caching</button>
+            <button type="button" class="chip" onclick="runPrompt('/code Add dark mode toggle in navbar')">/code Add dark mode toggle</button>
+            <button type="button" class="chip" onclick="runPrompt('/code Write pytest unit tests for webhook payload handler')">/code Write pytest unit tests</button>
           </div>
 
           <div class="input-box-wrapper">
@@ -386,11 +386,11 @@
             </p>
             <div class="code-block">
               <code>cd cloudflare-worker && wrangler deploy</code>
-              <button class="copy-btn" onclick="copyCode('cd cloudflare-worker && wrangler deploy')">Copy</button>
+              <button class="copy-btn" onclick="copyCode('cd cloudflare-worker && wrangler deploy', event)">Copy</button>
             </div>
             <div class="code-block" style="margin-top: 0.75rem;">
               <code>wrangler secret put GITHUB_PAT && wrangler secret put SLACK_BOT_TOKEN</code>
-              <button class="copy-btn" onclick="copyCode('wrangler secret put GITHUB_PAT && wrangler secret put SLACK_BOT_TOKEN')">Copy</button>
+              <button class="copy-btn" onclick="copyCode('wrangler secret put GITHUB_PAT && wrangler secret put SLACK_BOT_TOKEN', event)">Copy</button>
             </div>
           </div>
 
@@ -402,7 +402,7 @@
             </p>
             <ul style="color: var(--text-muted); margin: 1rem 0 0 1.5rem; line-height: 1.8;">
               <li><strong>Command:</strong> <code style="color: #38bdf8;">/code</code></li>
-              <li><strong>Request URL:</strong> <code style="color: #38bdf8;">https://github-automation.<your-subdomain>.workers.dev</code></li>
+              <li><strong>Request URL:</strong> <code style="color: #38bdf8;">https://github-automation.&lt;your-subdomain&gt;.workers.dev</code></li>
               <li><strong>Short Description:</strong> Trigger Autonomous AI Developer</li>
             </ul>
           </div>
@@ -415,11 +415,11 @@
             </p>
             <div class="code-block">
               <code>AGY_AUTH_CONFIG = Base64(~/.gemini/config)</code>
-              <button class="copy-btn" onclick="copyCode('cat ~/.gemini/config | base64')">Copy Cmd</button>
+              <button class="copy-btn" onclick="copyCode('cat ~/.gemini/config | base64', event)">Copy Cmd</button>
             </div>
             <div class="code-block" style="margin-top: 0.75rem;">
               <code>PAT_TOKEN = GitHub Personal Access Token with repo scope</code>
-              <button class="copy-btn" onclick="copyCode('PAT_TOKEN')">Copy</button>
+              <button class="copy-btn" onclick="copyCode('PAT_TOKEN', event)">Copy</button>
             </div>
           </div>
         </div>
