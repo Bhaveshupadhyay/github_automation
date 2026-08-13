@@ -156,8 +156,8 @@ function generateDiff(prompt) {
 <span class="diff-add">+     assert response.status_code == 200</span><br>
 <span class="diff-add">+     assert "repository_dispatch" in response.json()</span>`;
   } else {
-    return `<span class="diff-info">--- a/src/runner.py</span><br>
-<span class="diff-info">+++ b/src/runner.py</span><br>
+    return `<span class="diff-info">--- a/automation/main.py</span><br>
+<span class="diff-info">+++ b/automation/main.py</span><br>
 <span class="diff-del">- # Pending implementation</span><br>
 <span class="diff-add">+ # Applied AST precision diff via Google Antigravity Engine</span><br>
 <span class="diff-add">+ result = agy.execute_prompt("${escapeHTML(prompt.replace('/code', '').trim())}")</span>`;

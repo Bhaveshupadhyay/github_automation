@@ -90,7 +90,6 @@ github_automation/
 ├── product_demo/
 │   ├── brag.mp4                         # Demonstration video
 │   └── brag.jpg                         # Video poster frame
-├── runner.py                            # Standalone Python engine execution orchestrator
 ├── pyproject.toml                       # Python project configuration (uv / hatchling)
 ├── index.html                           # Sandbox Web UI structure
 ├── style.css                            # Sandbox Web UI styling
