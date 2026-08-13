@@ -4,11 +4,11 @@ An enterprise, serverless AI developer pipeline triggered directly from **Slack*
 
 ---
 
-## Product Launch Video
+## Product Demo
 
 <video src="product_demo/brag.mp4" controls width="100%" poster="product_demo/brag.jpg"></video>
 
-> **Launch Video File:** [`product_demo/brag.mp4`](product_demo/brag.mp4)  
+> **Demo Video File:** [`product_demo/brag.mp4`](product_demo/brag.mp4)  
 > **Poster Thumbnail:** [`product_demo/brag.jpg`](product_demo/brag.jpg)
 
 ---
