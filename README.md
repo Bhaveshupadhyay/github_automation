@@ -4,12 +4,7 @@ AutoPR Slack AI is an enterprise-grade serverless autonomous AI developer pipeli
 
 ---
 
-## Product Demo
-
-<video src="product_demo/brag.mp4" controls width="100%" poster="product_demo/brag.jpg"></video>
-
-> **Demo Video File:** [`product_demo/brag.mp4`](product_demo/brag.mp4)  
-> **Poster Thumbnail:** [`product_demo/brag.jpg`](product_demo/brag.jpg)
+<img width="1152" height="720" alt="slack_bot" src="https://github.com/user-attachments/assets/1f5b6b1e-834c-4be0-9083-0610f640b3b9" />
 
 ---
 
