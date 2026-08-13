@@ -26,6 +26,16 @@ AutoPR Slack AI is an enterprise-grade serverless autonomous AI developer pipeli
 
 ---
 
+## Specialized Agent Skills & Tooling
+
+This project leverages specialized AI agent skills to achieve enterprise code quality, structural understanding, and design standards:
+
+- **Graphify (`graphify`)**: Analyzes codebase structure to build a persistent knowledge graph, reducing prompt token overhead by up to 50% and improving context resolution.
+- **UI/UX Pro Max (`nextlevelbuilder/ui-ux-pro-max-skill`)**: Provides design system token architecture, modern typography pairings, responsive layouts, and professional UI styling patterns.
+- **Agent Skills for Scalable Backend (`addyosmani/agent-skills`)**: Enforces clean architecture, decoupling service and repository layers for scalable Python backend development.
+
+---
+
 ## System Architecture
 
 ```text
@@ -179,8 +189,9 @@ npx wrangler dev
 
 ## Future Enhancements & Roadmap
 
-The execution architecture is designed with decoupled provider interfaces to support multi-engine execution driver adapters in upcoming releases:
+The execution architecture is designed with decoupled provider interfaces to support multi-engine execution driver adapters and extended tool protocols in upcoming releases:
 
+- **Figma Model Context Protocol (MCP) Integration**: Connecting Figma MCP servers to automatically generate production-grade UI code directly from Figma design frames and component specs.
 - **Multi-CLI Engine Integration**: Extending beyond the Google Antigravity (`agy`) CLI to support **Claude Code**, **OpenCode**, and other autonomous developer CLI tools.
 - **Pluggable Engine Selection**: Allowing users to specify execution engines via slash parameters (e.g., `/code --engine=claude` or `/code --engine=opencode`).
 - **Distributed Knowledge Graph Caching**: Persisting and reusing `graphify` knowledge graph structures across workflow runs to further optimize cold-start execution speeds.
