@@ -6,12 +6,10 @@ An enterprise, serverless AI developer pipeline triggered directly from **Slack*
 
 ## 🎬 Product Launch Video
 
-![AutoPR Slack AI Launch Video](/Users/bhaveshupadhyay/IdeaProjects/github_automation/brag-output-2026-08-13-055130/brag.mp4)
+<video src="product_demo/brag.mp4" controls width="100%" poster="product_demo/brag.jpg"></video>
 
-<video src="/Users/bhaveshupadhyay/IdeaProjects/github_automation/brag-output-2026-08-13-055130/brag.mp4" controls width="100%" poster="/Users/bhaveshupadhyay/IdeaProjects/github_automation/brag-output-2026-08-13-055130/brag.jpg"></video>
-
-> 📹 **Launch Video File:** [`brag-output-2026-08-13-055130/brag.mp4`](file:///Users/bhaveshupadhyay/IdeaProjects/github_automation/brag-output-2026-08-13-055130/brag.mp4)  
-> 🖼️ **Poster Thumbnail:** [`brag-output-2026-08-13-055130/brag.jpg`](file:///Users/bhaveshupadhyay/IdeaProjects/github_automation/brag-output-2026-08-13-055130/brag.jpg)
+> 📹 **Launch Video File:** [`product_demo/brag.mp4`](product_demo/brag.mp4)  
+> 🖼️ **Poster Thumbnail:** [`product_demo/brag.jpg`](product_demo/brag.jpg)
 
 ---
 
