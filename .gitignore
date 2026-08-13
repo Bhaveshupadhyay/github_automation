@@ -27,6 +27,8 @@ workspace_target/
 graphify-out/
 brag-output*/
 
-# Local-only Antigravity Skills (preserving .agents/rules/antigravity-instructions.md)
+# Local-only Antigravity Skills & Instructions
 .agents/skills/
+.agents/rules/antigravity-instructions.md
+antigravity-instructions.md
 skills-lock.json
