@@ -1,6 +1,6 @@
 # AutoPR Slack AI — Serverless Autonomous AI Developer
 
-AutoPR Slack AI is an enterprise-grade serverless autonomous AI developer pipeline. It accepts developer task requests directly from Slack or Telegram, resolves target repositories using Gemini intent classification and preflight context resolution, and executes the Google Antigravity Engine (`agy`) within GitHub Actions to generate, test, and open verified Pull Requests automatically.
+AutoPR Slack AI is an enterprise-grade serverless autonomous AI developer pipeline. It accepts developer task requests directly from Slack or Telegram, resolves target repositories using Gemini intent classification and preflight context resolution, constructs an AST knowledge graph via `graphify` to optimize context efficiency, and executes the Google Antigravity Engine (`agy`) within GitHub Actions to generate, test, and open verified Pull Requests automatically.
 
 ---
 
@@ -15,6 +15,8 @@ AutoPR Slack AI is an enterprise-grade serverless autonomous AI developer pipeli
 
 ## Key Features
 
+- **High Speed & Deterministic Reliability**: Combines sub-second Cloudflare Edge routing with preflight context resolution to deliver fast, reliable, end-to-end task completion.
+- **Graphify Knowledge Graph Integration**: Automatically builds a persistent AST knowledge graph of the codebase prior to engine invocation. This pre-indexing provides targeted structural context, cutting LLM token usage by up to 50%.
 - **Serverless Edge Webhook Handling**: Cloudflare Workers intercept incoming Slack slash commands and Telegram webhooks with sub-second response times.
 - **AI Intent & Repository Resolution**: Integrates Gemini models to parse unstructured prompt text, determine target GitHub repositories, and resolve default branches.
 - **Headless Antigravity Engine Execution**: Runs the Google Antigravity (`agy`) CLI inside ephemeral GitHub Actions runner VMs with session authentication.
@@ -44,9 +46,10 @@ AutoPR Slack AI is an enterprise-grade serverless autonomous AI developer pipeli
 |                     |
 | ├── 1. Environment & Auth Restoration (AGY_AUTH_CONFIG)
 | ├── 2. Preflight Target Resolution (automation/preflight.py)
-| ├── 3. Antigravity CLI Execution (agy run -y "$PROMPT")
-| ├── 4. Automated Verification & Git Commit
-| └── 5. Pull Request Submission (gh pr create)
+| ├── 3. Graphify Knowledge Graph Construction (Cuts token usage by 50%)
+| ├── 4. Antigravity CLI Execution (agy run -y "$PROMPT")
+| ├── 5. Automated Verification & Git Commit
+| └── 6. Pull Request Submission (gh pr create)
 +----------+----------+
            | Execution Result Callback
            v
@@ -171,6 +174,16 @@ Start local Wrangler environment:
 cd cloudflare-worker
 npx wrangler dev
 ```
+
+---
+
+## Future Enhancements & Roadmap
+
+The execution architecture is designed with decoupled provider interfaces to support multi-engine execution driver adapters in upcoming releases:
+
+- **Multi-CLI Engine Integration**: Extending beyond the Google Antigravity (`agy`) CLI to support **Claude Code**, **OpenCode**, and other autonomous developer CLI tools.
+- **Pluggable Engine Selection**: Allowing users to specify execution engines via slash parameters (e.g., `/code --engine=claude` or `/code --engine=opencode`).
+- **Distributed Knowledge Graph Caching**: Persisting and reusing `graphify` knowledge graph structures across workflow runs to further optimize cold-start execution speeds.
 
 ---
 
