@@ -1,4 +1,5 @@
 <img width="927" height="473" alt="Screenshot 2026-08-13 at 10 16 41 AM" src="https://github.com/user-attachments/assets/60612c2a-a52f-4347-82ef-ce19f354986a" />
+
 # AutoPR Slack AI — Serverless Autonomous AI Developer
 
 AutoPR Slack AI is an enterprise-grade serverless autonomous AI developer pipeline. It accepts developer task requests directly from Slack or Telegram, resolves target repositories using Gemini intent classification and preflight context resolution, constructs an AST knowledge graph via `graphify` to optimize context efficiency, and executes the Google Antigravity Engine (`agy`) within GitHub Actions to generate, test, and open verified Pull Requests automatically.
