@@ -25,6 +25,8 @@ Thumbs.db
 # Workspace target build folders
 workspace_target/
 graphify-out/
+brag-output*/
 
-# Local-only Antigravity Skills
-.agents/skills/github-automation-context/
+# Local-only Antigravity Skills (preserving .agents/rules/antigravity-instructions.md)
+.agents/skills/
+skills-lock.json

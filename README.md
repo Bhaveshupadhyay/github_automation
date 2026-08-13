@@ -1,6 +1,17 @@
-# 🚀 Serverless Antigravity AI Autonomous Developer Setup
+# ⚡ AutoPR Slack AI — Serverless Autonomous AI Developer
 
-An enterprise, serverless AI developer pipeline triggered from **Slack** or **Telegram** via **Cloudflare Workers**, executing **Google Antigravity Engine (`agy`)** inside **GitHub Actions** with zero API costs using your Google Pro Account.
+An enterprise, serverless AI developer pipeline triggered directly from **Slack** or **Telegram** via **Cloudflare Workers**, executing **Google Antigravity Engine (`agy`)** inside **GitHub Actions** with zero API costs using your Google Pro session authentication.
+
+---
+
+## 🌟 Interactive Landing Page & Sandbox
+
+This repository includes a dark-mode landing page and real-time interactive Slackbot simulator (`index.html`, `style.css`, `app.js`).
+
+### Features:
+- 💬 **Live Slack Slash Command Simulator**: Test prompts (`/code Add Redis caching`) and view simulated PR diffs in real-time.
+- ⚡ **Architecture Flowchart**: Step-by-step visual of Slack → Cloudflare Worker → GitHub Actions (`agy`) → PR Created.
+- 📋 **Quick Deployment Tabs**: Copy-paste deployment snippets for Cloudflare Wrangler, Slack Slash Commands, and GitHub Secrets.
 
 ---
 
@@ -46,10 +57,10 @@ An enterprise, serverless AI developer pipeline triggered from **Slack** or **Te
 
 ## 💬 Usage
 
-Send a command in Slack or Telegram:
+Send a slash command in Slack or Telegram:
 
 ```text
-/code bhaveshupadhyay/hiphomboombox_backend Add caching to get_trending_posts
+/code bhaveshupadhyay/app Add Redis caching to get_user_profile
 ```
 
-Antigravity Engine (`agy`) will execute on GitHub Actions, modify target code in-place, and open a Pull Request ready for human review!
+Antigravity Engine (`agy`) will execute on GitHub Actions, modify target code in-place, and open a Pull Request ready for review!
