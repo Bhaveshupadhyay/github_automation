@@ -1,16 +1,126 @@
 /* ==========================================================================
-   AutoPR Slack AI — Interactive Logic & Simulator
+   AutoPR Slack AI — Interactive Logic, Simulator & Analytics Tracking
+   Google Analytics 4 Property: G-WRTRH44MBB
    ========================================================================== */
 
+const GA_MEASUREMENT_ID = 'G-WRTRH44MBB';
+
+/**
+ * Dispatches a custom event to Google Analytics 4 via gtag.js
+ * @param {string} eventName - Semantic name of the event
+ * @param {Record<string, any>} eventParams - Contextual metadata properties
+ */
+function trackEvent(eventName, eventParams = {}) {
+  try {
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', eventName, {
+        ...eventParams,
+        send_to: GA_MEASUREMENT_ID,
+      });
+    }
+  } catch (err) {
+    console.warn(`[GA4 Error] Failed to track '${eventName}':`, err);
+  }
+}
+
+/**
+ * Categorize user Slack prompt for semantic analytics aggregation
+ * @param {string} prompt 
+ * @returns {string} category slug
+ */
+function categorizePrompt(prompt) {
+  const text = (prompt || '').toLowerCase();
+  if (text.includes('redis') || text.includes('cache')) return 'caching';
+  if (text.includes('dark mode') || text.includes('theme') || text.includes('css')) return 'ui_styling';
+  if (text.includes('test') || text.includes('pytest') || text.includes('unit')) return 'testing';
+  if (text.includes('auth') || text.includes('race') || text.includes('token') || text.includes('lock')) return 'auth_security';
+  if (text.includes('api') || text.includes('webhook') || text.includes('endpoint')) return 'api_development';
+  return 'general_code_refactoring';
+}
+
+/**
+ * Initializes global click event delegation to capture all user click interactions
+ */
+function initGlobalClickTracking() {
+  document.addEventListener('click', (event) => {
+    const clickable = event.target.closest(
+      'a, button, [role="button"], input[type="button"], input[type="submit"], .chip, .tab-btn, .copy-btn'
+    );
+    if (!clickable) return;
+
+    const tagName = clickable.tagName ? clickable.tagName.toLowerCase() : '';
+    const elementId = clickable.id || '';
+    const elementClasses = Array.from(clickable.classList || []).join(' ');
+
+    const isInsideChat = Boolean(clickable.closest('#chatList'));
+    const rawText = (
+      clickable.innerText ||
+      clickable.value ||
+      clickable.getAttribute('aria-label') ||
+      clickable.getAttribute('title') ||
+      ''
+    ).trim().slice(0, 80);
+
+    // Omit arbitrary user-derived prompt text from chat elements to prevent PII leakage to GA4
+    const elementText = isInsideChat ? '[Chat Link]' : rawText;
+
+    const href = clickable.getAttribute('href') || '';
+    const sectionContainer = clickable.closest('section, header, footer');
+    const sectionName = sectionContainer ? (sectionContainer.id || sectionContainer.tagName.toLowerCase()) : 'page_body';
+    const isOutbound = href.startsWith('http://') || href.startsWith('https://');
+
+    // 1. Dispatch universal click interaction event
+    trackEvent('ui_click', {
+      element_tag: tagName,
+      element_id: elementId || undefined,
+      element_class: elementClasses || undefined,
+      element_text: elementText || undefined,
+      element_href: href || undefined,
+      section_name: sectionName,
+      is_outbound: isOutbound,
+      event_category: 'User Interaction'
+    });
+
+    // 2. Track specific navigation categories
+    if (isOutbound) {
+      trackEvent('outbound_link_click', {
+        link_url: href,
+        link_text: elementText,
+        section_name: sectionName,
+        event_category: 'Navigation'
+      });
+    } else if (href.startsWith('#') && href.length > 1) {
+      trackEvent('anchor_nav_click', {
+        target_section: href.substring(1),
+        link_text: elementText,
+        section_name: sectionName,
+        event_category: 'Navigation'
+      });
+    }
+
+    // 3. Track PR links without user-derived PII payloads
+    if (clickable.classList.contains('pr-link') || clickable.closest('.slack-attachment')) {
+      trackEvent('pr_link_clicked', {
+        section_name: sectionName,
+        event_category: 'Simulator'
+      });
+    }
+  });
+}
+
+// Lifecycle Initialization
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('AutoPR Slack AI Portal loaded.');
+  console.log('AutoPR Slack AI Portal loaded. Google Analytics Active:', GA_MEASUREMENT_ID);
+
+  // Initialize global click tracking delegation
+  initGlobalClickTracking();
 
   const input = document.getElementById('slackInput');
   if (input) {
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        submitPrompt();
+        submitPrompt('keyboard_enter');
       }
     });
   }
@@ -18,20 +128,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Interactive Slack Simulator Logic
 function runPrompt(promptText) {
+  trackEvent('prompt_chip_clicked', {
+    prompt_category: categorizePrompt(promptText),
+    event_category: 'Simulator'
+  });
+
   const input = document.getElementById('slackInput');
   if (input) {
     input.value = promptText;
-    submitPrompt();
+    submitPrompt('chip_click');
   }
 }
 
-function submitPrompt() {
+function submitPrompt(source = 'button_click') {
   const input = document.getElementById('slackInput');
   const chatList = document.getElementById('chatList');
   if (!input || !chatList) return;
 
   const promptText = input.value.trim();
   if (!promptText) return;
+
+  // Track command submission in GA4 using privacy-safe category & length (no raw text)
+  trackEvent('simulator_command_submitted', {
+    command_category: categorizePrompt(promptText),
+    command_length: promptText.length,
+    trigger_source: source,
+    event_category: 'Simulator'
+  });
 
   // Clear input box after reading
   input.value = '';
@@ -86,6 +209,13 @@ function submitPrompt() {
       const prNumber = Math.floor(Math.random() * 80) + 120;
       const diffCode = generateDiff(promptText);
 
+      // Track simulated PR creation success with privacy-safe properties
+      trackEvent('simulator_pr_generated', {
+        pr_number: prNumber,
+        prompt_category: categorizePrompt(promptText),
+        event_category: 'Simulator'
+      });
+
       loadingElem.outerHTML = `
         <div class="message-item">
           <div class="avatar avatar-bot">⚡</div>
@@ -108,8 +238,8 @@ function submitPrompt() {
                 GitHub Pull Request #${prNumber} Created
               </div>
               <div style="font-size: 0.9rem; color: var(--text-muted);">
-                <strong>Branch:</strong> <code style="color: #c084fc;">${branchName}</code><br>
-                <strong>PR #${prNumber}:</strong> <a href="#" style="color: #38bdf8; text-decoration: none;">${escapeHTML(promptText.replace('/code', '').trim())}</a>
+                <strong>Branch:</strong> <code style="color: #c084fc;">${escapeHTML(branchName)}</code><br>
+                <strong>PR #${prNumber}:</strong> <a href="#" class="pr-link" style="color: #38bdf8; text-decoration: none;">${escapeHTML(promptText.replace('/code', '').trim())}</a>
               </div>
               <div class="diff-preview">
                 ${diffCode}
@@ -176,18 +306,37 @@ function openTab(evt, tabName) {
     btn.classList.remove('active');
   }
 
-  document.getElementById(tabName).classList.add('active');
-  if (evt && evt.currentTarget) {
-    evt.currentTarget.classList.add('active');
+  const targetPane = document.getElementById(tabName);
+  if (targetPane) {
+    targetPane.classList.add('active');
   }
+
+  const clickedBtn = (evt && evt.currentTarget) ? evt.currentTarget : null;
+  if (clickedBtn) {
+    clickedBtn.classList.add('active');
+  }
+
+  const tabTitle = clickedBtn ? clickedBtn.innerText.trim() : tabName;
+  trackEvent('setup_tab_selected', {
+    tab_id: tabName,
+    tab_title: tabTitle,
+    event_category: 'Documentation'
+  });
 }
 
 // One-Click Code Copier
 function copyCode(text, evt) {
-  const btn = (evt && evt.currentTarget) ? evt.currentTarget : (event ? event.target : null);
+  const btn = (evt && evt.currentTarget) ? evt.currentTarget : null;
+
   if (!navigator.clipboard) return;
 
   navigator.clipboard.writeText(text).then(() => {
+    trackEvent('code_snippet_copied', {
+      snippet_preview: (text || '').substring(0, 40),
+      snippet_length: (text || '').length,
+      event_category: 'Documentation'
+    });
+
     if (btn) {
       const origText = btn.textContent;
       btn.textContent = 'Copied! ✓';
