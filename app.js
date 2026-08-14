@@ -14,8 +14,8 @@ function trackEvent(eventName, eventParams = {}) {
   try {
     if (typeof window.gtag === 'function') {
       window.gtag('event', eventName, {
-        send_to: GA_MEASUREMENT_ID,
         ...eventParams,
+        send_to: GA_MEASUREMENT_ID,
       });
     }
   } catch (err) {
@@ -51,13 +51,18 @@ function initGlobalClickTracking() {
     const tagName = clickable.tagName ? clickable.tagName.toLowerCase() : '';
     const elementId = clickable.id || '';
     const elementClasses = Array.from(clickable.classList || []).join(' ');
-    const elementText = (
+
+    const isInsideChat = Boolean(clickable.closest('#chatList'));
+    const rawText = (
       clickable.innerText ||
       clickable.value ||
       clickable.getAttribute('aria-label') ||
       clickable.getAttribute('title') ||
       ''
     ).trim().slice(0, 80);
+
+    // Omit arbitrary user-derived prompt text from chat elements to prevent PII leakage to GA4
+    const elementText = isInsideChat ? '[Chat Link]' : rawText;
 
     const href = clickable.getAttribute('href') || '';
     const sectionContainer = clickable.closest('section, header, footer');
@@ -93,10 +98,9 @@ function initGlobalClickTracking() {
       });
     }
 
-    // 3. Track PR links
+    // 3. Track PR links without user-derived PII payloads
     if (clickable.classList.contains('pr-link') || clickable.closest('.slack-attachment')) {
       trackEvent('pr_link_clicked', {
-        link_text: elementText,
         section_name: sectionName,
         event_category: 'Simulator'
       });
@@ -125,7 +129,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // Interactive Slack Simulator Logic
 function runPrompt(promptText) {
   trackEvent('prompt_chip_clicked', {
-    chip_prompt: promptText,
     prompt_category: categorizePrompt(promptText),
     event_category: 'Simulator'
   });
@@ -145,9 +148,8 @@ function submitPrompt(source = 'button_click') {
   const promptText = input.value.trim();
   if (!promptText) return;
 
-  // Track command submission event in GA4
+  // Track command submission in GA4 using privacy-safe category & length (no raw text)
   trackEvent('simulator_command_submitted', {
-    command_text: promptText,
     command_category: categorizePrompt(promptText),
     command_length: promptText.length,
     trigger_source: source,
@@ -207,10 +209,9 @@ function submitPrompt(source = 'button_click') {
       const prNumber = Math.floor(Math.random() * 80) + 120;
       const diffCode = generateDiff(promptText);
 
-      // Track simulated PR creation success
+      // Track simulated PR creation success with privacy-safe properties
       trackEvent('simulator_pr_generated', {
         pr_number: prNumber,
-        branch_name: branchName,
         prompt_category: categorizePrompt(promptText),
         event_category: 'Simulator'
       });
@@ -237,7 +238,7 @@ function submitPrompt(source = 'button_click') {
                 GitHub Pull Request #${prNumber} Created
               </div>
               <div style="font-size: 0.9rem; color: var(--text-muted);">
-                <strong>Branch:</strong> <code style="color: #c084fc;">${branchName}</code><br>
+                <strong>Branch:</strong> <code style="color: #c084fc;">${escapeHTML(branchName)}</code><br>
                 <strong>PR #${prNumber}:</strong> <a href="#" class="pr-link" style="color: #38bdf8; text-decoration: none;">${escapeHTML(promptText.replace('/code', '').trim())}</a>
               </div>
               <div class="diff-preview">
@@ -325,17 +326,17 @@ function openTab(evt, tabName) {
 
 // One-Click Code Copier
 function copyCode(text, evt) {
-  const btn = (evt && evt.currentTarget) ? evt.currentTarget : (window.event ? window.event.target : null);
-
-  trackEvent('code_snippet_copied', {
-    snippet_preview: (text || '').substring(0, 40),
-    snippet_length: (text || '').length,
-    event_category: 'Documentation'
-  });
+  const btn = (evt && evt.currentTarget) ? evt.currentTarget : null;
 
   if (!navigator.clipboard) return;
 
   navigator.clipboard.writeText(text).then(() => {
+    trackEvent('code_snippet_copied', {
+      snippet_preview: (text || '').substring(0, 40),
+      snippet_length: (text || '').length,
+      event_category: 'Documentation'
+    });
+
     if (btn) {
       const origText = btn.textContent;
       btn.textContent = 'Copied! ✓';
