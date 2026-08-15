@@ -41,21 +41,27 @@
         </div>
         <span>AutoPR <span class="gradient-accent-text">Slack AI</span></span>
       </a>
-      
-      <ul class="nav-links">
+           <ul class="nav-links">
         <li><a href="#simulator" id="nav-link-simulator">Live Sandbox</a></li>
         <li><a href="#features" id="nav-link-features">Features</a></li>
         <li><a href="#architecture" id="nav-link-architecture">Architecture</a></li>
         <li><a href="#setup" id="nav-link-setup">Setup Guide</a></li>
+        <li><a href="#services" id="nav-link-services">Custom AI Setup</a></li>
       </ul>
 
-      <div style="display: flex; gap: 0.8rem;">
-        <a href="https://github.com/bhaveshupadhyay/github_automation" target="_blank" class="btn btn-secondary" id="nav-btn-github">
+      <div style="display: flex; gap: 0.8rem; align-items: center;">
+        <a href="https://github.com/bhaveshupadhyay/github_automation" target="_blank" class="btn btn-icon btn-secondary" id="nav-btn-github" title="GitHub Repository" aria-label="GitHub Repository">
           <!-- Official GitHub SVG Logo -->
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
           </svg>
-          GitHub Repo
+        </a>
+        <a href="https://www.fiverr.com/coderandroid" target="_blank" class="btn btn-icon btn-fiverr-icon" id="nav-btn-fiverr" title="Hire on Fiverr" aria-label="Hire on Fiverr">
+          <!-- Official Fiverr SVG Logo -->
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="11" fill="#1DBF73"/>
+            <path d="M8.2 16.5h2.2v-5.3h1.8V9.4h-1.8V8.3c0-.5.3-.6.7-.6.3 0 .8 0 1.2.1V6c-.5-.1-1.1-.1-1.6-.1-1.8 0-2.4 1-2.4 2.4v1.1H6.5v1.9h1.7v5.2zm9-7.1h-2.2v7.1h2.2V9.4zm-1.1-1.3c.7 0 1.2-.5 1.2-1.2 0-.7-.5-1.2-1.2-1.2-.7 0-1.2.5-1.2 1.2 0 .7.5 1.2 1.2 1.2z" fill="#FFFFFF"/>
+          </svg>
         </a>
         <a href="#setup" class="btn btn-slack" id="nav-btn-slack">
           <!-- User Provided Slack SVG Image -->
@@ -212,6 +218,17 @@
           </div>
         </div>
       </div>
+
+      <!-- Subtle Non-Intrusive Services Callout -->
+      <div class="simulator-hire-callout">
+        <span>✨ <strong>Want a custom version of this AI bot for your team's private stack or CRM?</strong></span>
+        <a href="#services" class="callout-link" id="link-sim-hire">
+          Explore Custom Automation Services
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </a>
+      </div>
     </div>
   </section>
 
@@ -237,7 +254,7 @@
           <div class="icon-wrapper icon-wrapper-cloudflare">
             <!-- Cloudflare Logo -->
             <svg width="32" height="32" viewBox="0 0 24 24" fill="#F38020">
-              <path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/>
+              <path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/>
             </svg>
           </div>
           <h3>Serverless Cloudflare Edge</h3>
@@ -322,7 +339,7 @@
           <div class="flow-number">2</div>
           <div class="flow-logo-badge badge-cloudflare">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="#F38020">
-              <path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/>
+              <path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/>
             </svg>
           </div>
           <h4>Cloudflare Edge</h4>
@@ -377,7 +394,7 @@
       <div class="setup-box">
         <div class="setup-tabs">
           <button class="tab-btn active" id="tab-btn-cloudflare" onclick="openTab(event, 'tab-cloudflare')">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="#F38020"><path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#F38020"><path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/></svg>
             1. Cloudflare Worker
           </button>
           <button class="tab-btn" id="tab-btn-slack" onclick="openTab(event, 'tab-slack')">
@@ -435,6 +452,155 @@
               <button class="copy-btn" id="copy-btn-pat-token" onclick="copyCode('PAT_TOKEN', event)">Copy</button>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Custom AI Engineering & Freelance Services Section -->
+  <section id="services" class="services-section">
+    <div class="container">
+      <div class="section-header">
+        <div class="services-badge">
+          <span>⚡</span>
+          <span>Enterprise AI Engineering & Custom Workflows</span>
+        </div>
+        <h2>Want This Automation or Have a Big Idea to Deploy?</h2>
+        <p>Don't let engineering bottlenecks slow your startup or team down. I build custom AI agents, automated Slack/Discord bots, and serverless edge workflows tailored to your exact stack.</p>
+      </div>
+
+      <div class="services-grid">
+        <!-- Service Card 1 -->
+        <div class="service-card" id="service-card-slackbot">
+          <div>
+            <div class="service-card-header">
+              <div class="service-icon">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="3" y1="9" x2="21" y2="9"></line>
+                  <line x1="9" y1="21" x2="9" y2="9"></line>
+                </svg>
+              </div>
+              <h3>Custom Slack & Telegram AI Bots</h3>
+              <p>Want this autonomous PR bot or an internal AI assistant customized for your private GitHub/GitLab org, Jira, Linear, or database?</p>
+            </div>
+
+            <div class="service-tags">
+              <span class="service-tag">Private Repositories</span>
+              <span class="service-tag">Jira & Linear Sync</span>
+              <span class="service-tag">Custom Team Rules</span>
+              <span class="service-tag">24-48h Delivery</span>
+            </div>
+          </div>
+
+          <div class="service-card-footer">
+            <span class="service-price-hint">Starting from $150</span>
+            <a href="https://www.fiverr.com/coderandroid" target="_blank" class="service-cta-link" id="link-hire-bot">
+              Hire on Fiverr ➔
+            </a>
+          </div>
+        </div>
+
+        <!-- Service Card 2 -->
+        <div class="service-card" id="service-card-mvp">
+          <div>
+            <div class="service-card-header">
+              <div class="service-icon icon-purple">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                  <path d="M2 17l10 5 10-5"></path>
+                  <path d="M2 12l10 5 10-5"></path>
+                </svg>
+              </div>
+              <h3>1-Person Dev Team for Startups (MVPs)</h3>
+              <p>Have a business idea or repetitive manual process? I architect and build complete full-stack AI web apps and autonomous pipelines from scratch in days, not months.</p>
+            </div>
+
+            <div class="service-tags">
+              <span class="service-tag">Fast 48h–1wk MVP</span>
+              <span class="service-tag">Zero Server Idle Costs</span>
+              <span class="service-tag">Production Clean Code</span>
+              <span class="service-tag">Full Ownership</span>
+            </div>
+          </div>
+
+          <div class="service-card-footer">
+            <span class="service-price-hint">Fixed Milestone Pricing</span>
+            <a href="https://www.fiverr.com/coderandroid" target="_blank" class="service-cta-link" id="link-hire-mvp">
+              Hire on Fiverr ➔
+            </a>
+          </div>
+        </div>
+
+        <!-- Service Card 3 -->
+        <div class="service-card" id="service-card-edge">
+          <div>
+            <div class="service-card-header">
+              <div class="service-icon icon-blue">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                </svg>
+              </div>
+              <h3>Edge AI & Multi-Agent Architecture</h3>
+              <p>Integrate ultra-fast LLMs (Google Gemini, Claude, Antigravity), AST codebase indexing, and Cloudflare serverless workers directly into your existing infrastructure.</p>
+            </div>
+
+            <div class="service-tags">
+              <span class="service-tag">Cloudflare Workers</span>
+              <span class="service-tag">Python Clean Arch</span>
+              <span class="service-tag">Graphify AST Index</span>
+              <span class="service-tag">Sub-Second Edge</span>
+            </div>
+          </div>
+
+          <div class="service-card-footer">
+            <span class="service-price-hint">Hourly & Project Rates</span>
+            <a href="https://www.fiverr.com/coderandroid" target="_blank" class="service-cta-link" id="link-hire-edge">
+              Hire on Fiverr ➔
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- High-Trust Conversion Banner -->
+      <div class="consulting-banner">
+        <div class="consulting-banner-text">
+          <h3>Ready to Automate Your Workflows or Launch Your Next AI Product?</h3>
+          <p>
+            Work directly with an autonomous systems engineer. All projects are backed by <strong>100% Fiverr Escrow Protection</strong>, milestone-based delivery, and direct 1-on-1 communication.
+          </p>
+          <div class="trust-badges">
+            <div class="trust-item">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+              <span>100% Escrow Protected</span>
+            </div>
+            <div class="trust-item">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              <span>24–48h Rapid Turnaround</span>
+            </div>
+            <div class="trust-item">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+              <span>100% Code Ownership</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="consulting-banner-cta">
+          <a href="https://www.fiverr.com/coderandroid" target="_blank" class="btn-fiverr" id="btn-fiverr-main-cta">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h-2v-6h2v6zm4 0h-2v-4h2v4zm-3-8a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/>
+            </svg>
+            Book Custom AI Build on Fiverr ➔
+          </a>
+          <span class="cta-subtext">Zero upfront risk • Fast response</span>
         </div>
       </div>
     </div>
