@@ -251,6 +251,31 @@ h1, h2, h3, h4 {
   box-shadow: 0 8px 20px -4px rgba(74, 21, 75, 0.6);
 }
 
+.btn-icon {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+}
+
+.btn-fiverr-icon {
+  background: var(--bg-card);
+  border-color: var(--border);
+  color: #1dbf73;
+}
+
+.btn-fiverr-icon:hover {
+  background: rgba(29, 191, 115, 0.15);
+  border-color: #1dbf73;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -4px rgba(29, 191, 115, 0.4);
+}
+
 /* Hero Section */
 .hero {
   padding: 5rem 0 4rem;
