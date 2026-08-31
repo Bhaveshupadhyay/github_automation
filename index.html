@@ -110,9 +110,17 @@
             <path d="M5 12h14M12 5l7 7-7 7"/>
           </svg>
         </a>
-        <a href="#architecture" class="btn btn-secondary" id="btn-hero-architecture">
-          View Architecture
+        <a href="#setup" class="btn btn-secondary" id="btn-hero-setup">
+          1-Command Quickstart
         </a>
+      </div>
+
+      <div class="hero-quickstart" style="margin-top: 2rem; display: inline-flex; align-items: center; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(99, 102, 241, 0.4); border-radius: 9999px; padding: 0.5rem 0.6rem 0.5rem 1.25rem; gap: 1rem; box-shadow: 0 8px 30px rgba(99, 102, 241, 0.15); backdrop-filter: blur(12px);">
+        <div style="display: flex; align-items: center; gap: 0.6rem; font-family: 'Fira Code', monospace; font-size: 0.95rem;">
+          <span style="color: #6366f1; font-weight: 600;">$</span>
+          <span style="color: #f8fafc; font-weight: 500;">npx autopr-slack</span>
+        </div>
+        <button class="copy-btn" id="hero-copy-npx" style="position: static; padding: 0.4rem 0.9rem; font-size: 0.8rem; border-radius: 9999px;" onclick="copyCode('npx autopr-slack', event)">Copy</button>
       </div>
     </div>
   </section>
@@ -393,63 +401,74 @@
 
       <div class="setup-box">
         <div class="setup-tabs">
-          <button class="tab-btn active" id="tab-btn-cloudflare" onclick="openTab(event, 'tab-cloudflare')">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="#F38020"><path d="M16.48 15.68c.28-.5.42-1.06.42-1.63 0-1.85-1.5-3.35-3.35-3.35-.38 0-.74.06-1.08.18A4.75 4.75 0 0 0 7.8 7.37a4.73 4.73 0 0 0-4.63 3.69A3.87 3.87 0 0 0 0 14.82c0 2.14 1.74 3.88 3.88h12.6c1.65 0 3-.15 3.52-1.63.43-1.23-.02-2.39-.52-3.39z"/></svg>
-            1. Cloudflare Worker
+          <button class="tab-btn active" id="tab-btn-npx" onclick="openTab(event, 'tab-npx')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            1. Zero-Clone Setup (npx)
           </button>
-          <button class="tab-btn" id="tab-btn-slack" onclick="openTab(event, 'tab-slack')">
+          <button class="tab-btn" id="tab-btn-manifest" onclick="openTab(event, 'tab-manifest')">
             <img src="slack.svg" width="22" height="22" alt="Slack Logo" />
-            2. Slack Slash Command
+            2. 1-Click Slack Manifest
           </button>
-          <button class="tab-btn" id="tab-btn-github" onclick="openTab(event, 'tab-github')">
+          <button class="tab-btn" id="tab-btn-pypi" onclick="openTab(event, 'tab-pypi')">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-            3. GitHub Secrets
+            3. PyPI Engine & Modular CLI
           </button>
         </div>
 
         <div class="setup-content">
-          <!-- Tab 1: Cloudflare -->
-          <div id="tab-cloudflare" class="tab-pane active">
-            <h3>Deploy Cloudflare Worker Edge</h3>
+          <!-- Tab 1: NPX Wizard -->
+          <div id="tab-npx" class="tab-pane active">
+            <h3>⚡ 1-Command Zero-Clone Setup Wizard</h3>
             <p style="color: var(--text-muted); margin-top: 0.5rem;">
-              Deploy the serverless worker to handle Slack webhooks and forward commands to GitHub Actions.
+              No manual repository cloning required! Run this single command inside your repository or project folder to configure your entire autonomous AI developer pipeline automatically:
             </p>
-            <div class="code-block">
-              <code>cd cloudflare-worker && wrangler deploy</code>
-              <button class="copy-btn" id="copy-btn-wrangler-deploy" onclick="copyCode('cd cloudflare-worker && wrangler deploy', event)">Copy</button>
+            <div class="code-block" style="margin-top: 1rem;">
+              <code>npx autopr-slack</code>
+              <button class="copy-btn" id="copy-btn-npx-init" onclick="copyCode('npx autopr-slack', event)">Copy Command</button>
             </div>
-            <div class="code-block" style="margin-top: 0.75rem;">
-              <code>wrangler secret put GITHUB_PAT && wrangler secret put SLACK_BOT_TOKEN</code>
-              <button class="copy-btn" id="copy-btn-wrangler-secrets" onclick="copyCode('wrangler secret put GITHUB_PAT && wrangler secret put SLACK_BOT_TOKEN', event)">Copy</button>
-            </div>
-          </div>
-
-          <!-- Tab 2: Slack -->
-          <div id="tab-slack" class="tab-pane">
-            <h3>Configure Slack Slash Command</h3>
-            <p style="color: var(--text-muted); margin-top: 0.5rem;">
-              In your Slack App Settings, navigate to <strong>Slash Commands</strong> and click <strong>Create New Command</strong>.
-            </p>
-            <ul style="color: var(--text-muted); margin: 1rem 0 0 1.5rem; line-height: 1.8;">
-              <li><strong>Command:</strong> <code style="color: #38bdf8;">/code</code></li>
-              <li><strong>Request URL:</strong> <code style="color: #38bdf8;">https://github-automation.&lt;your-subdomain&gt;.workers.dev</code></li>
-              <li><strong>Short Description:</strong> Trigger Autonomous AI Developer</li>
+            <ul style="color: var(--text-muted); margin: 1rem 0 0 1.5rem; line-height: 1.8; font-size: 0.95rem;">
+              <li><strong>Step 1:</strong> Preflight environment &amp; target repo diagnostics.</li>
+              <li><strong>Step 2:</strong> Workflow selection &amp; installation (PyPI uvx, reusable, or standalone).</li>
+              <li><strong>Step 3:</strong> Deploys Cloudflare Worker edge webhook (sub-50ms routing).</li>
+              <li><strong>Step 4:</strong> Generates 1-click <code>slack-app-manifest.json</code>.</li>
+              <li><strong>Step 5:</strong> Provisions GitHub &amp; Cloudflare secrets via <code>gh</code> CLI.</li>
             </ul>
           </div>
 
-          <!-- Tab 3: GitHub -->
-          <div id="tab-github" class="tab-pane">
-            <h3>Add GitHub Repository Secrets</h3>
+          <!-- Tab 2: Slack Manifest -->
+          <div id="tab-manifest" class="tab-pane">
+            <h3>📱 1-Click Slack App Manifest</h3>
             <p style="color: var(--text-muted); margin-top: 0.5rem;">
-              Configure secrets in your target GitHub repository (<strong>Settings → Secrets and variables → Actions</strong>):
+              The setup wizard generates <code>slack-app-manifest.json</code> with pre-configured slash commands (<code>/code</code>), event subscriptions, and OAuth scopes.
             </p>
-            <div class="code-block">
-              <code>AGY_AUTH_CONFIG = Base64(~/.gemini/config)</code>
-              <button class="copy-btn" id="copy-btn-cat-config" onclick="copyCode('cat ~/.gemini/config | base64', event)">Copy Cmd</button>
+            <ol style="color: var(--text-muted); margin: 1rem 0 0 1.5rem; line-height: 1.8; font-size: 0.95rem;">
+              <li>Go to <a href="https://api.slack.com/apps" target="_blank" style="color: #38bdf8; text-decoration: underline;">api.slack.com/apps</a> and click <strong>Create New App</strong>.</li>
+              <li>Select <strong>From an app manifest</strong> and choose your Slack workspace.</li>
+              <li>Paste the contents of <code>slack-app-manifest.json</code> and click <strong>Create</strong>.</li>
+              <li>Click <strong>Install to Workspace</strong> and copy your Bot User OAuth Token (<code>xoxb-...</code>) and Signing Secret.</li>
+            </ol>
+            <div class="code-block" style="margin-top: 1rem;">
+              <code>npx autopr-slack manifest</code>
+              <button class="copy-btn" id="copy-btn-npx-manifest" onclick="copyCode('npx autopr-slack manifest', event)">Copy</button>
             </div>
+          </div>
+
+          <!-- Tab 3: PyPI & Modular CLI -->
+          <div id="tab-pypi" class="tab-pane">
+            <h3>🐍 PyPI Engine &amp; Modular CLI Subcommands</h3>
+            <p style="color: var(--text-muted); margin-top: 0.5rem;">
+              The core Antigravity execution engine runs instantly via <code>uvx</code> with zero installation:
+            </p>
             <div class="code-block" style="margin-top: 0.75rem;">
-              <code>PAT_TOKEN = GitHub Personal Access Token with repo scope</code>
-              <button class="copy-btn" id="copy-btn-pat-token" onclick="copyCode('PAT_TOKEN', event)">Copy</button>
+              <code>uvx --from github-automation-ai autopr</code>
+              <button class="copy-btn" id="copy-btn-uvx-run" onclick="copyCode('uvx --from github-automation-ai autopr', event)">Copy</button>
+            </div>
+            <p style="color: var(--text-muted); margin-top: 1rem; font-size: 0.95rem;">
+              You can also execute individual CLI modules on-demand:
+            </p>
+            <div class="code-block" style="margin-top: 0.5rem;">
+              <code>npx autopr-slack workflow &amp;&amp; npx autopr-slack secrets</code>
+              <button class="copy-btn" id="copy-btn-npx-modules" onclick="copyCode('npx autopr-slack workflow &amp;&amp; npx autopr-slack secrets', event)">Copy</button>
             </div>
           </div>
         </div>
