@@ -1,8 +1,14 @@
 <img width="927" height="473" alt="Screenshot 2026-08-13 at 10 16 41 AM" src="https://github.com/user-attachments/assets/60612c2a-a52f-4347-82ef-ce19f354986a" />
 
-# AutoPR Slack AI — Serverless Autonomous AI Developer
+# AutoPR Slack AI — Autonomous AI Developer
 
-AutoPR Slack AI is an enterprise-grade serverless autonomous AI developer pipeline. It accepts developer task requests directly from Slack or Telegram, resolves target repositories using Gemini intent classification and preflight context resolution, constructs an AST knowledge graph via `graphify` to optimize context efficiency, and executes the Google Antigravity Engine (`agy`) within GitHub Actions to generate, test, and open verified Pull Requests automatically.
+[![npm version](https://img.shields.io/npm/v/autopr-slack.svg?color=cb3837&logo=npm)](https://www.npmjs.com/package/autopr-slack)
+[![PyPI version](https://img.shields.io/pypi/v/github-automation-ai.svg?color=3775a9&logo=pypi)](https://pypi.org/project/github-automation-ai/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+
+AutoPR Slack AI is a **zero-clone, serverless autonomous AI developer pipeline**. It turns natural language task requests from Slack or Telegram into tested, production-grade GitHub Pull Requests in seconds.
+
+No manual cloning, no local Python environment setup, and zero runner compute costs on your central repository. Everything executes directly inside your target repository's GitHub Actions runner using the Google Antigravity Engine (`agy`) and Graphify AST indexing.
 
 ---
 
@@ -10,30 +16,142 @@ AutoPR Slack AI is an enterprise-grade serverless autonomous AI developer pipeli
 
 ---
 
-## Key Features
+## ⚡ 1-Command Quickstart (Zero-Clone Setup)
 
-- **High Speed & Deterministic Reliability**: Combines sub-second Cloudflare Edge routing with preflight context resolution to deliver fast, reliable, end-to-end task completion.
-- **Graphify Knowledge Graph Integration**: Automatically builds a persistent AST knowledge graph of the codebase prior to engine invocation. This pre-indexing provides targeted structural context, cutting LLM token usage by up to 50%.
-- **Serverless Edge Webhook Handling**: Cloudflare Workers intercept incoming Slack slash commands and Telegram webhooks with sub-second response times.
-- **AI Intent & Repository Resolution**: Integrates Gemini models to parse unstructured prompt text, determine target GitHub repositories, and resolve default branches.
-- **Headless Antigravity Engine Execution**: Runs the Google Antigravity (`agy`) CLI inside ephemeral GitHub Actions runner VMs with session authentication.
-- **Automated Pull Request Lifecycle**: Automatically creates target feature branches, applies precision code modifications, runs verification, and submits GitHub Pull Requests.
-- **Threaded Status Feedback**: Updates Slack and Telegram discussion threads in real-time with execution status, PR links, and AI summarization.
-- **Interactive Sandbox & Web UI**: Includes a local web interface (`index.html`, `style.css`, `app.js`) for simulating slash commands, inspecting architecture flows, and testing deployment configurations.
+You don't need to clone this repository. Open your terminal inside any GitHub repository (or any empty folder) and run:
+
+```bash
+npx autopr-slack
+```
+
+*(or `npx autopr-slack init`)*
+
+The interactive wizard configures your entire autonomous developer pipeline in **5 guided steps**:
+
+```text
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║   ⚡ AutoPR Slack AI — Autonomous AI Developer               ║
+║   Zero-Clone Edge & GitHub Actions Setup Wizard               ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+
+[1/5] Diagnostics & Target Repository Resolution
+  ✔ Node.js Runtime: v22.x
+  ✔ Git CLI & GitHub CLI (gh) authenticated
+  ✔ Target Repository: your-org/your-repo
+
+[2/5] Cloudflare Worker Fast-Path Deployment
+  ✔ Deploys serverless edge webhook via Wrangler (zero idle server costs)
+  ✔ Output endpoint: https://autopr-your-repo.subdomain.workers.dev
+
+[3/5] 1-Click Slack App Manifest Generation
+  ✔ Generates slack-app-manifest.json with pre-configured /code slash commands,
+    event subscriptions, and bot scopes
+
+[4/5] GitHub Repository Secrets Provisioning
+  ✔ Automatically provisions PAT_TOKEN, SLACK_BOT_TOKEN, and AGY_AUTH_CONFIG
+    directly to your GitHub repository via gh CLI
+
+[5/5] GitHub Actions Workflow Injection
+  ✔ Injects .github/workflows/autopr.yml using ultra-fast uvx execution
+  ✔ Auto-pushes workflow to your remote GitHub repository
+```
 
 ---
 
-## Specialized Agent Skills & Tooling
+## 📖 End-to-End Setup Instructions (Start to Finish)
 
-This project leverages specialized AI agent skills to achieve enterprise code quality, structural understanding, and design standards:
+### Step 1: Run the Setup Wizard
 
-- **Graphify (`graphify`)**: Analyzes codebase structure to build a persistent knowledge graph, reducing prompt token overhead by up to 50% and improving context resolution.
-- **UI/UX Pro Max (`nextlevelbuilder/ui-ux-pro-max-skill`)**: Provides design system token architecture, modern typography pairings, responsive layouts, and professional UI styling patterns.
-- **Agent Skills for Scalable Backend (`addyosmani/agent-skills`)**: Enforces clean architecture, decoupling service and repository layers for scalable Python backend development.
+Inside your terminal, execute:
+
+```bash
+npx autopr-slack
+```
+
+The wizard will prompt you for:
+- **GitHub Workflow Target Repository**: `owner/repo` (auto-detected if inside a git repo).
+- **Cloudflare Worker Name**: Custom name or default `autopr-<repo>`.
+- **GitHub Personal Access Token (PAT)**: Classic token with `repo` and `workflow` scopes.
+- **Gemini API Key / Antigravity Config**: For intent classification and headless engine reasoning.
 
 ---
 
-## System Architecture
+### Step 2: Create the Slack App (1-Click Manifest)
+
+The wizard creates a file named `slack-app-manifest.json` in your project folder.
+
+1. Go to [**api.slack.com/apps**](https://api.slack.com/apps) and click **Create New App**.
+2. Select **From an app manifest**.
+3. Choose your Slack workspace.
+4. Open `slack-app-manifest.json`, copy its entire content, and paste it into Slack.
+5. Click **Create**, then click **Install to Workspace**.
+6. Copy your **Bot User OAuth Token** (`xoxb-...`) and **Signing Secret** back into the terminal wizard (or run `npx autopr-slack secrets`).
+
+---
+
+### Step 3: Invite Bot to Your Slack Channel
+
+In your Slack workspace:
+1. Open the channel where you want the bot to operate (e.g. `#dev-team` or `#eng-prs`).
+2. Type `/invite @AutoPR AI` (or mention `@AutoPR AI` and click **Add to Channel**).
+
+---
+
+### Step 4: Issue Commands & Watch PRs Open Automatically!
+
+Type a slash command directly in Slack:
+
+```slack
+/code Add Redis caching to the get_user_profile endpoint
+```
+
+Or target any repository dynamically:
+
+```slack
+/code org/api-gateway Fix race condition in authentication token refresh
+```
+
+#### What happens next:
+1. **Sub-second Edge Acknowledgement**: Cloudflare Worker validates the request in `<50ms` and replies in your Slack thread with a progress indicator.
+2. **Intent & Repository Resolution**: Gemini extracts repository targets, branches, and task constraints.
+3. **Graphify AST Indexing**: Actions runner constructs a lightweight AST knowledge graph of the target repository, reducing token overhead by up to 50%.
+4. **Antigravity AI Engine (`agy`)**: Generates precision code diffs, runs test suites (`pytest`, `npm test`, etc.), and verifies fixes with zero regressions.
+5. **Verified PR Created**: Pushes a new feature branch, opens a GitHub Pull Request, and posts the PR link and AI summary directly back into your Slack thread!
+
+---
+
+## 🛠️ CLI Subcommands & Tooling
+
+In addition to the master wizard, you can run individual modules on demand:
+
+| Command | Description |
+| :--- | :--- |
+| `npx autopr-slack init` | Runs the full 5-step interactive setup wizard. |
+| `npx autopr-slack workflow` | Injects the GitHub Actions workflow into current repository. |
+| `npx autopr-slack deploy-worker` | Builds and deploys the Cloudflare Worker serverless edge webhook. |
+| `npx autopr-slack manifest` | Generates a 1-click Slack App Manifest JSON file. |
+| `npx autopr-slack secrets` | Configures GitHub Actions and Cloudflare secrets via `gh` CLI. |
+| `npx autopr-slack check` | Runs system diagnostics and preflight credential checks. |
+
+---
+
+## 🐍 Python Engine via PyPI (`uvx`)
+
+The core execution engine is also published on PyPI as [`github-automation-ai`](https://pypi.org/project/github-automation-ai/):
+
+```bash
+# Run the automation engine on-demand anywhere without installing:
+uvx --from github-automation-ai autopr
+
+# Or test preflight target resolution locally:
+uvx --from github-automation-ai python -m automation.preflight --prompt "org/repo Fix auth token refresh"
+```
+
+---
+
+## 🏛️ System Architecture
 
 ```text
 +---------------------+
@@ -43,197 +161,53 @@ This project leverages specialized AI agent skills to achieve enterprise code qu
            | Webhook HTTP POST
            v
 +---------------------+
-| Cloudflare Worker   |  <-- Fast-path validation & Gemini intent parsing
+| Cloudflare Worker   |  <-- Sub-50ms Fast-Path & Gemini Intent Parsing
 +----------+----------+
            | Repository Dispatch API Event
            v
 +---------------------+
-| GitHub Actions VM   |
-| (Runner Engine)     |
+| GitHub Actions VM   |  <-- Executes on YOUR Repository Runner
+| (Autonomous Engine) |
 |                     |
-| ├── 1. Environment & Auth Restoration (AGY_AUTH_CONFIG)
+| ├── 1. Restore Antigravity Session (AGY_AUTH_CONFIG)
 | ├── 2. Preflight Target Resolution (automation/preflight.py)
-| ├── 3. Graphify Knowledge Graph Construction (Cuts token usage by 50%)
-| ├── 4. Antigravity CLI Execution (agy run -y "$PROMPT")
-| ├── 5. Automated Verification & Git Commit
-| └── 6. Pull Request Submission (gh pr create)
+| ├── 3. Graphify AST Knowledge Graph Indexing (Cuts tokens by 50%)
+| ├── 4. Google Antigravity Execution (agy run -y "$PROMPT")
+| ├── 5. Automated Unit Testing & Lint Validation
+| └── 6. GitHub Pull Request Creation (gh pr create)
 +----------+----------+
            | Execution Result Callback
            v
 +---------------------+
-| Slack Thread Reply  |  <-- Posts PR URL & AI summary back to thread
+| Slack Thread Reply  |  <-- Posts PR URL & AI Summary back to thread
 +---------------------+
 ```
 
 ---
 
-## Project Structure
+## 🔐 Environment & Security Configuration
 
-```text
-github_automation/
-├── .github/
-│   └── workflows/
-│       ├── ai-autonomous-developer.yml   # Primary GitHub Actions execution workflow
-│       ├── deploy-pages.yml             # GitHub Pages deployment workflow
-│       └── test-workflow.yml            # Integration test workflow
-├── automation/
-│   ├── core/                            # Core engine configurations & logging
-│   ├── domain/                          # Business entities and value objects
-│   ├── interfaces/                      # API clients and GitHub/Slack adapters
-│   ├── services/                        # Intent routing, preflight resolution, summarization
-│   ├── preflight.py                     # Repository & target branch preflight script
-│   └── main.py                          # Automation entrypoint
-├── cloudflare-worker/
-│   ├── worker.js                        # Worker entrypoint for dispatching events
-│   ├── slack-worker.js                  # Slack webhook & challenge handler
-│   └── wrangler.toml                    # Cloudflare Worker configuration manifest
-├── product_demo/
-│   ├── brag.mp4                         # Demonstration video
-│   └── brag.jpg                         # Video poster frame
-├── pyproject.toml                       # Python project configuration (uv / hatchling)
-├── index.html                           # Sandbox Web UI structure
-├── style.css                            # Sandbox Web UI styling
-└── app.js                               # Sandbox Web UI interactive logic
-```
+All sensitive keys remain strictly inside your private GitHub Repository Secrets and Cloudflare Worker environment:
 
----
-
-## Prerequisites
-
-- **Python**: Version 3.12 or higher.
-- **Package Manager**: [`uv`](https://github.com/astral-sh/uv) (recommended) or standard `pip`.
-- **Node.js**: Version 18 or higher (for Cloudflare Wrangler CLI).
-- **GitHub CLI**: `gh` CLI installed and authenticated with repository permissions.
-- **Antigravity CLI**: `agy` executable installed on the worker environment or GitHub Actions runner.
-
----
-
-## Configuration & Environment Secrets
-
-### 1. GitHub Repository Secrets
-
-Configure the following secrets under **Settings > Secrets and variables > Actions** in your GitHub repository:
-
-| Secret Name | Description |
+| Secret Name | Purpose |
 | :--- | :--- |
-| `AGY_AUTH_CONFIG` | Base64-encoded session configuration file (`~/.gemini/config`) for Google Antigravity CLI authentication. |
 | `PAT_TOKEN` | GitHub Personal Access Token (Classic) with `repo`, `workflow`, and `write:packages` scopes. |
-| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (`xoxb-...`) for sending thread updates and status messages. |
-| `GEMINI_API_KEY` | Optional API key for Gemini models used during preflight intent resolution. |
-
-### 2. Cloudflare Worker Secrets
-
-Set worker secrets using `wrangler secret put`:
-
-```bash
-cd cloudflare-worker
-npx wrangler secret put GITHUB_PAT
-npx wrangler secret put SLACK_BOT_TOKEN
-npx wrangler secret put GEMINI_API_KEY
-```
+| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (`xoxb-...`) for posting threaded replies. |
+| `SLACK_SIGNING_SECRET` | Slack Signing Secret for cryptographic webhook signature verification. |
+| `AGY_AUTH_CONFIG` | Base64-encoded session configuration file (`~/.gemini/config`) for Google Antigravity CLI. |
+| `GEMINI_API_KEY` | Optional Gemini API Key used for fast edge intent classification and repository resolution. |
 
 ---
 
-## Quickstart (Zero-Clone Setup via `npx`)
+## 🤝 Contributing
 
-You can set up AutoPR in any repository with a single command — **no manual cloning required**:
-
-```bash
-npx autopr-slack
-```
-
-The interactive wizard will automatically:
-1. Validate GitHub CLI & environment diagnostics.
-2. Inject the reusable GitHub Actions workflow (`.github/workflows/autopr.yml`).
-3. Deploy the Cloudflare Worker serverless edge webhook.
-4. Generate your 1-click **Slack App Manifest** (`slack-app-manifest.json`).
-5. Provision required repository secrets via `gh secret set`.
+1. Fork the repository and create a feature branch (`git checkout -b feat/your-feature`).
+2. Follow Clean Architecture and PEP 8 conventions.
+3. Run tests with `uv run pytest`.
+4. Open a Pull Request detailing the changes and verification steps.
 
 ---
 
-## Manual Deployment & Setup
+## 📄 License
 
-### Deploying the Cloudflare Worker Manually
-
-1. Navigate to the worker directory:
-   ```bash
-   cd cloudflare-worker
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Deploy to your Cloudflare account:
-   ```bash
-   npx wrangler deploy
-   ```
-4. Copy the output Worker HTTP endpoint URL and configure it as your Request URL in the Slack App settings under **Slash Commands** (e.g. `/code` or `/autopr`).
-
----
-
-## Local Development & Testing
-
-### Running Python Tests
-
-Execute test suites using `uv`:
-
-```bash
-uv run pytest
-```
-
-### Testing Preflight Target Resolution Locally
-
-Run the preflight resolution module locally to verify repository intent parsing:
-
-```bash
-uv run python -m automation.preflight --prompt "bhaveshupadhyay/app Add Redis caching to user service"
-```
-
-### Running the Cloudflare Worker Locally
-
-Start local Wrangler environment:
-
-```bash
-cd cloudflare-worker
-npx wrangler dev
-```
-
----
-
-## Future Enhancements & Roadmap
-
-The execution architecture is designed with decoupled provider interfaces to support multi-engine execution driver adapters and extended tool protocols in upcoming releases:
-
-- **Figma Model Context Protocol (MCP) Integration**: Connecting Figma MCP servers to automatically generate production-grade UI code directly from Figma design frames and component specs.
-- **Multi-CLI Engine Integration**: Extending beyond the Google Antigravity (`agy`) CLI to support **Claude Code**, **OpenCode**, and other autonomous developer CLI tools.
-- **Pluggable Engine Selection**: Allowing users to specify execution engines via slash parameters (e.g., `/code --engine=claude` or `/code --engine=opencode`).
-- **Distributed Knowledge Graph Caching**: Persisting and reusing `graphify` knowledge graph structures across workflow runs to further optimize cold-start execution speeds.
-
----
-
-## Contributing Guidelines
-
-We welcome contributions to AutoPR Slack AI. Please follow these guidelines when submitting pull requests or opening issues:
-
-### Branching Strategy
-
-- `main`: Production-ready branch. All changes enter via Pull Requests.
-- Feature branches: Use prefix `feat/` (e.g., `feat/add-telegram-adapter`).
-- Bug fix branches: Use prefix `fix/` (e.g., `fix/intent-router-fallback`).
-- Documentation: Use prefix `docs/` (e.g., `docs/update-architecture-spec`).
-- Refactoring: Use prefix `refactor/` (e.g., `refactor/clean-architecture`).
-
-### Pull Request Process
-
-1. Fork the repository and create a new feature branch from `main`.
-2. Ensure code follows clean architecture patterns, PEP 8 standards, and includes proper type hints.
-3. Write or update unit tests for any new or modified functionality.
-4. Run `uv run pytest` to ensure all tests pass.
-5. Submit a Pull Request detailing the problem solved, changes made, and verification steps taken.
-6. Obtain approval from at least one repository maintainer before merging.
-
----
-
-## License & Security
-
-This project is distributed under the MIT License. For security vulnerabilities or concerns, please open an issue or contact the maintainers directly.
+This project is licensed under the [MIT License](LICENSE).
