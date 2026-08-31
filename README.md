@@ -134,9 +134,26 @@ npx wrangler secret put GEMINI_API_KEY
 
 ---
 
-## Deployment & Setup
+## Quickstart (Zero-Clone Setup via `npx`)
 
-### Deploying the Cloudflare Worker
+You can set up AutoPR in any repository with a single command — **no manual cloning required**:
+
+```bash
+npx autopr-slack
+```
+
+The interactive wizard will automatically:
+1. Validate GitHub CLI & environment diagnostics.
+2. Inject the reusable GitHub Actions workflow (`.github/workflows/autopr.yml`).
+3. Deploy the Cloudflare Worker serverless edge webhook.
+4. Generate your 1-click **Slack App Manifest** (`slack-app-manifest.json`).
+5. Provision required repository secrets via `gh secret set`.
+
+---
+
+## Manual Deployment & Setup
+
+### Deploying the Cloudflare Worker Manually
 
 1. Navigate to the worker directory:
    ```bash

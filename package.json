@@ -1,0 +1,36 @@
+{
+  "name": "autopr-slack",
+  "version": "0.1.0",
+  "description": "Zero-clone autonomous AI Developer setup for Slack & GitHub Actions",
+  "type": "module",
+  "main": "cli/index.js",
+  "bin": {
+    "autopr-slack": "./bin/cli.js",
+    "create-autopr": "./bin/cli.js"
+  },
+  "files": [
+    "bin",
+    "cli",
+    "cloudflare-worker"
+  ],
+  "scripts": {
+    "start": "node bin/cli.js",
+    "deploy:worker": "wrangler deploy --config cloudflare-worker/wrangler.toml",
+    "dev:worker": "wrangler dev --config cloudflare-worker/wrangler.toml"
+  },
+  "keywords": [
+    "autopr",
+    "slack",
+    "ai-developer",
+    "antigravity",
+    "gemini",
+    "github-actions",
+    "cloudflare-worker",
+    "npx"
+  ],
+  "author": "Bhavesh Upadhyay",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

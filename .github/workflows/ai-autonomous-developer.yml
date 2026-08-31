@@ -25,6 +25,45 @@ on:
       slack_thread_ts:
         description: "Slack Thread Timestamp"
         required: false
+  workflow_call:
+    inputs:
+      target_repo:
+        type: string
+        description: "Target Repository (owner/repo)"
+        required: false
+      user_prompt:
+        type: string
+        description: "User Prompt"
+        required: false
+      model:
+        type: string
+        description: "AI Model (e.g. gemini-3.1-flash-lite)"
+        required: false
+        default: "gemini-3.1-flash-lite"
+      effort:
+        type: string
+        description: "Reasoning Effort (high, medium, low)"
+        required: false
+        default: "high"
+      slack_channel:
+        type: string
+        description: "Slack Channel ID"
+        required: false
+      slack_thread_ts:
+        type: string
+        description: "Slack Thread Timestamp"
+        required: false
+    secrets:
+      PAT_TOKEN:
+        required: false
+      SLACK_BOT_TOKEN:
+        required: false
+      AGY_AUTH_CONFIG:
+        required: false
+      AGY_SESSION_DATA:
+        required: false
+      AGY_API_KEY:
+        required: false
 
 jobs:
   run-agy-agent:
@@ -33,6 +72,8 @@ jobs:
     steps:
       - name: Checkout Workflow Repository
         uses: actions/checkout@v4
+        with:
+          repository: bhaveshupadhyay/github_automation
 
       - name: Setup uv & Python Environment
         uses: astral-sh/setup-uv@v5

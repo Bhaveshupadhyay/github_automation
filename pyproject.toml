@@ -1,12 +1,31 @@
 [project]
-name = "github-automation"
+name = "github-automation-ai"
 version = "0.1.0"
-description = "Antigravity Autonomous Developer Workflow Engine"
+description = "Antigravity Autonomous Developer Workflow Engine for GitHub & Slack"
+readme = "README.md"
 requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Bhavesh Upadhyay" }
+]
+keywords = [
+    "autopr",
+    "github-automation",
+    "slack",
+    "gemini",
+    "antigravity",
+    "ai-developer"
+]
 dependencies = [
     "pydantic>=2.0.0",
     "google-genai>=0.1.0",
 ]
+
+[project.scripts]
+autopr = "automation.main:main"
+github-automation = "automation.main:main"
+github-automation-ai = "automation.main:main"
+
 
 [build-system]
 requires = ["hatchling"]

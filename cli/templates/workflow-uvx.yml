@@ -1,0 +1,76 @@
+name: AutoPR AI Autonomous Developer
+
+on:
+  repository_dispatch:
+    types: [ai_developer_task]
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: "Target Repository (owner/repo)"
+        required: false
+      user_prompt:
+        description: "User Prompt"
+        required: false
+      model:
+        description: "AI Model (e.g. gemini-3.1-flash-lite)"
+        required: false
+        default: "gemini-3.1-flash-lite"
+      effort:
+        description: "Reasoning Effort (high, medium, low)"
+        required: false
+        default: "high"
+      slack_channel:
+        description: "Slack Channel ID"
+        required: false
+      slack_thread_ts:
+        description: "Slack Thread Timestamp"
+        required: false
+
+jobs:
+  run-autopr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+
+      - name: Setup uv & Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Install Antigravity CLI (agy)
+        run: |
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.gemini/antigravity-cli/bin" >> $GITHUB_PATH
+          echo "$HOME/.gemini/antigravity-cli" >> $GITHUB_PATH
+
+      - name: Restore Antigravity Auth Config
+        env:
+          AGY_AUTH_CONFIG: ${{ secrets.AGY_AUTH_CONFIG }}
+          AGY_SESSION_DATA: ${{ secrets.AGY_SESSION_DATA }}
+        run: |
+          mkdir -p ~/.gemini/antigravity-cli ~/.gemini/config
+          if [ -n "$AGY_SESSION_DATA" ]; then
+            echo "$AGY_SESSION_DATA" | tr -d '\r\n ' | base64 -d > ~/.gemini/antigravity-cli/antigravity-oauth-token || true
+          fi
+          if [ -n "$AGY_AUTH_CONFIG" ]; then
+            echo "$AGY_AUTH_CONFIG" | tr -d '\r\n ' | base64 -d > ~/.gemini/oauth_creds.json || true
+          fi
+
+      - name: Run AutoPR Engine via uvx (PyPI)
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.inputs.slack_channel || github.event.client_payload.slack_channel }}
+          SLACK_THREAD: ${{ github.event.inputs.slack_thread_ts || github.event.client_payload.slack_thread_ts }}
+          TARGET_REPO: ${{ github.event.inputs.target_repo || github.event.client_payload.target_repo || github.repository }}
+          USER_PROMPT: ${{ github.event.inputs.user_prompt || github.event.client_payload.user_prompt }}
+          MODEL_NAME: ${{ github.event.inputs.model || github.event.client_payload.model || 'gemini-3.1-flash-lite' }}
+          EFFORT_VAL: ${{ github.event.inputs.effort || github.event.client_payload.effort || 'high' }}
+          GEMINI_API_KEY: ${{ secrets.AGY_API_KEY }}
+          AGY_API_KEY: ${{ secrets.AGY_API_KEY }}
+        run: |
+          uvx --from github-automation-ai autopr
