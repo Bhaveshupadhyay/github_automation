@@ -8,6 +8,10 @@
     "autopr-slack": "./bin/cli.js",
     "create-autopr": "./bin/cli.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Bhaveshupadhyay/github_automation.git"
+  },
   "files": [
     "bin",
     "cli",
