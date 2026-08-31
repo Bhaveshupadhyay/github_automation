@@ -90,13 +90,55 @@ export async function promptText(question, defaultValue = "") {
 }
 
 export async function promptSecret(question) {
-  const rl = readline.createInterface({ input, output });
-  try {
-    const answer = await rl.question(`  ${c.bold("?")} ${question} ${c.gray("(input will be hidden in logs)")}: `);
-    return answer.trim();
-  } finally {
-    rl.close();
+  if (!process.stdin.isTTY) {
+    const rl = readline.createInterface({ input, output });
+    try {
+      const answer = await rl.question(`  ${c.bold("?")} ${question}: `);
+      return answer.trim();
+    } finally {
+      rl.close();
+    }
   }
+
+  return new Promise((resolve) => {
+    process.stdout.write(`  ${c.bold("?")} ${question}: `);
+    let secret = "";
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+
+    const onData = (char) => {
+      // Handle Ctrl+C
+      if (char === "\u0003") {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener("data", onData);
+        process.exit(1);
+      }
+      // Handle Enter / Return
+      if (char === "\r" || char === "\n" || char === "\u0004") {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener("data", onData);
+        process.stdout.write("\n");
+        resolve(secret.trim());
+        return;
+      }
+      // Handle Backspace
+      if (char === "\u0008" || char === "\x7f") {
+        if (secret.length > 0) {
+          secret = secret.slice(0, -1);
+          process.stdout.write("\b \b");
+        }
+        return;
+      }
+      // Append normal character and display masked asterisk
+      secret += char;
+      process.stdout.write("*");
+    };
+
+    process.stdin.on("data", onData);
+  });
 }
 
 export async function promptConfirm(question, defaultYes = true) {

@@ -1,4 +1,4 @@
-import { execSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,17 +8,31 @@ import { parseRepoSlug } from "./check.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+export function sanitizeWorkerName(name) {
+  if (!name) return "slack-antigravity-worker";
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 63) || "slack-antigravity-worker";
+}
+
 export function setCloudflareSecret(key, val, wranglerTomlPath, workerDir) {
   if (!val) return false;
   try {
-    execSync(`npx wrangler secret put ${key} --config "${wranglerTomlPath}"`, {
+    const result = spawnSync("npx", ["wrangler", "secret", "put", key, "--config", wranglerTomlPath], {
       cwd: workerDir,
       input: val,
       encoding: "utf8",
       stdio: ["pipe", "ignore", "ignore"],
     });
-    logSuccess(`Set Cloudflare secret: ${key}`);
-    return true;
+    if (result.status === 0) {
+      logSuccess(`Set Cloudflare secret: ${key}`);
+      return true;
+    }
+    logWarn(`Could not automatically set Cloudflare secret ${key}`);
+    return false;
   } catch (err) {
     logWarn(`Could not automatically set Cloudflare secret ${key}: ${err.message}`);
     return false;
@@ -41,8 +55,10 @@ export async function deployCloudflareWorker(targetRepoSlug = null, credentials 
     repoName = await promptText("GitHub Workflow Repository Name", repoName || "github_automation");
   }
 
-  const defaultWorkerName = repoName ? `autopr-${repoName}` : "slack-antigravity-worker";
-  const workerName = await promptText("Cloudflare Worker name", defaultWorkerName);
+  const rawDefaultName = repoName ? `autopr-${repoName}` : "slack-antigravity-worker";
+  const defaultWorkerName = sanitizeWorkerName(rawDefaultName);
+  const inputWorkerName = await promptText("Cloudflare Worker name", defaultWorkerName);
+  const workerName = sanitizeWorkerName(inputWorkerName);
 
   // Prompt for keys available before bot creation
   console.log(`\n${c.dim("Configure GitHub & Gemini Credentials (Press Enter to skip if already set):")}`);

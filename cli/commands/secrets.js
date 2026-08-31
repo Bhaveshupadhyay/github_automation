@@ -1,10 +1,37 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { c, logSuccess, logWarn, logError, logInfo, promptSecret, promptConfirm } from "../ui.js";
 import { checkCommandAvailable, getGhAuthStatus, getCurrentGitRepo, parseRepoSlug } from "./check.js";
 import { setCloudflareSecret } from "./deployWorker.js";
+
+const VALID_REPO_REGEX = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+function setGithubSecret(name, val, targetRepo) {
+  if (!val) return false;
+  const args = ["secret", "set", name];
+  if (targetRepo) {
+    if (!VALID_REPO_REGEX.test(targetRepo)) {
+      logWarn(`Invalid repository format: ${targetRepo}. Cannot set secret ${name}.`);
+      return false;
+    }
+    args.push("-R", targetRepo);
+  }
+
+  try {
+    execFileSync("gh", args, {
+      input: val,
+      encoding: "utf8",
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+    logSuccess(`Configured GitHub secret: ${name}`);
+    return true;
+  } catch (e) {
+    logError(`Failed to set ${name} on GitHub: ${e.message}`);
+    return false;
+  }
+}
 
 export async function configureSecrets(repoSlug = null, credentials = {}, workerConfig = null) {
   const parsed = parseRepoSlug(repoSlug);
@@ -26,36 +53,16 @@ export async function configureSecrets(repoSlug = null, credentials = {}, worker
     console.log(`Target GitHub Repository: ${c.brightGreen(targetRepo)}\n`);
   }
 
-  const repoFlag = targetRepo ? `-R "${targetRepo}"` : "";
-
   // 1. PAT_TOKEN
   const patToken = credentials.patToken || await promptSecret("Enter GitHub Personal Access Token (PAT_TOKEN / GITHUB_PAT)");
   if (patToken) {
-    try {
-      execSync(`gh secret set PAT_TOKEN ${repoFlag}`, {
-        input: patToken,
-        encoding: "utf8",
-        stdio: ["pipe", "ignore", "ignore"],
-      });
-      logSuccess("Configured GitHub secret: PAT_TOKEN");
-    } catch (e) {
-      logError(`Failed to set PAT_TOKEN on GitHub: ${e.message}`);
-    }
+    setGithubSecret("PAT_TOKEN", patToken, targetRepo);
   }
 
-  // 2. SLACK_BOT_TOKEN (Now available after user creates App from Manifest)
+  // 2. SLACK_BOT_TOKEN
   const slackToken = credentials.slackBotToken || await promptSecret("Enter Slack Bot User OAuth Token (SLACK_BOT_TOKEN - xoxb-...)");
   if (slackToken) {
-    try {
-      execSync(`gh secret set SLACK_BOT_TOKEN ${repoFlag}`, {
-        input: slackToken,
-        encoding: "utf8",
-        stdio: ["pipe", "ignore", "ignore"],
-      });
-      logSuccess("Configured GitHub secret: SLACK_BOT_TOKEN");
-    } catch (e) {
-      logError(`Failed to set SLACK_BOT_TOKEN on GitHub: ${e.message}`);
-    }
+    setGithubSecret("SLACK_BOT_TOKEN", slackToken, targetRepo);
 
     if (workerConfig?.wranglerTomlPath && workerConfig?.workerDir) {
       setCloudflareSecret("SLACK_BOT_TOKEN", slackToken, workerConfig.wranglerTomlPath, workerConfig.workerDir);
@@ -71,16 +78,7 @@ export async function configureSecrets(repoSlug = null, credentials = {}, worker
   // 4. AGY_API_KEY / GEMINI_API_KEY
   const geminiKey = credentials.geminiApiKey || await promptSecret("Enter Gemini / Antigravity API Key (AGY_API_KEY / GEMINI_API_KEY)");
   if (geminiKey) {
-    try {
-      execSync(`gh secret set AGY_API_KEY ${repoFlag}`, {
-        input: geminiKey,
-        encoding: "utf8",
-        stdio: ["pipe", "ignore", "ignore"],
-      });
-      logSuccess("Configured GitHub secret: AGY_API_KEY");
-    } catch (e) {
-      logError(`Failed to set AGY_API_KEY on GitHub: ${e.message}`);
-    }
+    setGithubSecret("AGY_API_KEY", geminiKey, targetRepo);
   }
 
   // 5. AGY_AUTH_CONFIG (Auto-detect from ~/.gemini if exists)
@@ -94,14 +92,9 @@ export async function configureSecrets(repoSlug = null, credentials = {}, worker
       try {
         const fileData = fs.readFileSync(oauthCredsPath);
         const b64 = fileData.toString("base64");
-        execSync(`gh secret set AGY_AUTH_CONFIG ${repoFlag}`, {
-          input: b64,
-          encoding: "utf8",
-          stdio: ["pipe", "ignore", "ignore"],
-        });
-        logSuccess("Configured GitHub secret: AGY_AUTH_CONFIG (auto-encoded base64)");
+        setGithubSecret("AGY_AUTH_CONFIG", b64, targetRepo);
       } catch (e) {
-        logError(`Failed to set AGY_AUTH_CONFIG: ${e.message}`);
+        logError(`Failed to read AGY_AUTH_CONFIG: ${e.message}`);
       }
     }
   }
@@ -112,14 +105,9 @@ export async function configureSecrets(repoSlug = null, credentials = {}, worker
       try {
         const fileData = fs.readFileSync(agyTokenPath);
         const b64 = fileData.toString("base64");
-        execSync(`gh secret set AGY_SESSION_DATA ${repoFlag}`, {
-          input: b64,
-          encoding: "utf8",
-          stdio: ["pipe", "ignore", "ignore"],
-        });
-        logSuccess("Configured GitHub secret: AGY_SESSION_DATA (auto-encoded base64)");
+        setGithubSecret("AGY_SESSION_DATA", b64, targetRepo);
       } catch (e) {
-        logError(`Failed to set AGY_SESSION_DATA: ${e.message}`);
+        logError(`Failed to read AGY_SESSION_DATA: ${e.message}`);
       }
     }
   }

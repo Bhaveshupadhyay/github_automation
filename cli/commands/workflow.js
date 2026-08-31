@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { c, logSuccess, logWarn, logInfo, promptSelect, promptConfirm } from "../ui.js";
 import { checkCommandAvailable, getGhAuthStatus, parseRepoSlug } from "./check.js";
@@ -8,16 +8,24 @@ import { checkCommandAvailable, getGhAuthStatus, parseRepoSlug } from "./check.j
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const VALID_REPO_REGEX = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
 export async function pushWorkflowToRemoteGithub(targetRepo, remoteFilePath, content) {
+  if (!targetRepo || !VALID_REPO_REGEX.test(targetRepo)) {
+    logWarn(`Invalid repository slug format: ${targetRepo}. Skipping remote push.`);
+    return false;
+  }
+
   const contentBase64 = Buffer.from(content).toString("base64");
   const cleanPath = remoteFilePath.replace(/^\.?\/?/, "");
 
   let sha = null;
   try {
-    const existingJson = execSync(`gh api /repos/${targetRepo}/contents/${cleanPath}`, {
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "ignore"],
-    });
+    const existingJson = execFileSync(
+      "gh",
+      ["api", `/repos/${targetRepo}/contents/${cleanPath}`],
+      { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }
+    );
     const parsed = JSON.parse(existingJson);
     sha = parsed.sha;
   } catch {
@@ -31,11 +39,15 @@ export async function pushWorkflowToRemoteGithub(targetRepo, remoteFilePath, con
   };
 
   try {
-    execSync(`gh api --method PUT /repos/${targetRepo}/contents/${cleanPath} --input -`, {
-      input: JSON.stringify(payload),
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    execFileSync(
+      "gh",
+      ["api", "--method", "PUT", `/repos/${targetRepo}/contents/${cleanPath}`, "--input", "-"],
+      {
+        input: JSON.stringify(payload),
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      }
+    );
     logSuccess(`Pushed workflow file directly to GitHub: ${c.bold(c.brightGreen(`https://github.com/${targetRepo}/blob/main/${cleanPath}`))}`);
     return true;
   } catch (err) {
@@ -90,7 +102,7 @@ export async function installWorkflow(targetDir = process.cwd(), targetRepoSlug 
   const parsedRepo = parseRepoSlug(targetRepoSlug);
   const repoSlug = parsedRepo.slug;
 
-  if (repoSlug && checkCommandAvailable("gh") && getGhAuthStatus().ok) {
+  if (repoSlug && VALID_REPO_REGEX.test(repoSlug) && checkCommandAvailable("gh") && getGhAuthStatus().ok) {
     const shouldPushRemote = await promptConfirm(
       `Push workflow file directly to remote GitHub repository (${c.brightGreen(repoSlug)})?`,
       true
