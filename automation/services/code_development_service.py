@@ -125,7 +125,7 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         logger.info("Executing Code Development Pipeline (Graphify AST + agy Engine + Git Branch & PR)...")
 
         # Step 0: Check for existing thread branch and initialize Slack telemetry card
-        existing_branch = self.metadata_service.find_existing_thread_branch() or self.config.existing_branch
+        existing_branch = self.config.existing_branch or self.metadata_service.find_existing_thread_branch()
         is_update_run = bool(existing_branch)
         if self.telemetry_service:
             self.telemetry_service.initialize_card(is_update_run=is_update_run, existing_branch=existing_branch)
