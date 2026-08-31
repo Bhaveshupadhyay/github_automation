@@ -23,6 +23,9 @@ venv/
 Thumbs.db
 
 # Workspace target build folders
+dist/
+build/
+*.egg-info/
 workspace_target/
 graphify-out/
 brag-output*/

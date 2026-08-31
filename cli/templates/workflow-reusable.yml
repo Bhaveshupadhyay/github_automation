@@ -1,0 +1,44 @@
+name: AutoPR AI Developer (Reusable)
+
+on:
+  repository_dispatch:
+    types: [ai_developer_task]
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: "Target Repository (owner/repo)"
+        required: false
+      user_prompt:
+        description: "User Prompt"
+        required: false
+      model:
+        description: "AI Model"
+        required: false
+        default: "gemini-3.1-flash-lite"
+      effort:
+        description: "Reasoning Effort"
+        required: false
+        default: "high"
+      slack_channel:
+        description: "Slack Channel ID"
+        required: false
+      slack_thread_ts:
+        description: "Slack Thread Timestamp"
+        required: false
+
+jobs:
+  run-autopr:
+    uses: bhaveshupadhyay/github_automation/.github/workflows/ai-autonomous-developer.yml@main
+    with:
+      target_repo: ${{ github.event.inputs.target_repo || github.event.client_payload.target_repo || github.repository }}
+      user_prompt: ${{ github.event.inputs.user_prompt || github.event.client_payload.user_prompt }}
+      model: ${{ github.event.inputs.model || github.event.client_payload.model || 'gemini-3.1-flash-lite' }}
+      effort: ${{ github.event.inputs.effort || github.event.client_payload.effort || 'high' }}
+      slack_channel: ${{ github.event.inputs.slack_channel || github.event.client_payload.slack_channel }}
+      slack_thread_ts: ${{ github.event.inputs.slack_thread_ts || github.event.client_payload.slack_thread_ts }}
+    secrets:
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      AGY_AUTH_CONFIG: ${{ secrets.AGY_AUTH_CONFIG }}
+      AGY_SESSION_DATA: ${{ secrets.AGY_SESSION_DATA }}
+      AGY_API_KEY: ${{ secrets.AGY_API_KEY }}
