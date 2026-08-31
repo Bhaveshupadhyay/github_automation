@@ -53,8 +53,24 @@ export async function configureSecrets(repoSlug = null, credentials = {}, worker
     console.log(`Target GitHub Repository: ${c.brightGreen(targetRepo)}\n`);
   }
 
-  // 1. PAT_TOKEN
-  const patToken = credentials.patToken || await promptSecret("Enter GitHub Personal Access Token (PAT_TOKEN / GITHUB_PAT)");
+  // 1. PAT_TOKEN — resolve from env vars or gh auth token before prompting
+  function resolveGithubPat() {
+    // Check common env var names
+    const fromEnv = process.env.PAT_TOKEN || process.env.GITHUB_PAT || process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+    if (fromEnv) return fromEnv;
+    // Fall back to the active gh CLI session token
+    try {
+      const token = execFileSync("gh", ["auth", "token"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      if (token) return token;
+    } catch (_) { /* gh not authenticated or not available */ }
+    return null;
+  }
+
+  const detectedPat = credentials.patToken || resolveGithubPat();
+  if (detectedPat) {
+    logInfo("GitHub token auto-detected — skipping PAT prompt.");
+  }
+  const patToken = detectedPat || await promptSecret("Enter GitHub Personal Access Token (PAT_TOKEN / GITHUB_PAT)");
   if (patToken) {
     setGithubSecret("PAT_TOKEN", patToken, targetRepo);
   }

@@ -62,7 +62,21 @@ export async function deployCloudflareWorker(targetRepoSlug = null, credentials 
 
   // Prompt for keys available before bot creation
   console.log(`\n${c.dim("Configure GitHub & Gemini Credentials (Press Enter to skip if already set):")}`);
-  const githubPat = credentials.patToken || await promptSecret("GitHub Personal Access Token (GITHUB_PAT / PAT_TOKEN)");
+
+  // Auto-detect PAT from env vars or active gh CLI session before prompting
+  function resolveGithubPat() {
+    const fromEnv = process.env.PAT_TOKEN || process.env.GITHUB_PAT || process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+    if (fromEnv) return fromEnv;
+    try {
+      const token = execFileSync("gh", ["auth", "token"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      if (token) return token;
+    } catch (_) { /* not available */ }
+    return null;
+  }
+
+  const detectedPat = credentials.patToken || resolveGithubPat();
+  if (detectedPat) logInfo("GitHub token auto-detected — skipping PAT prompt.");
+  const githubPat = detectedPat || await promptSecret("GitHub Personal Access Token (GITHUB_PAT / PAT_TOKEN)");
   const geminiApiKey = credentials.geminiApiKey || await promptSecret("Gemini API Key (GEMINI_API_KEY / AGY_API_KEY)");
 
   logInfo("Building and deploying Cloudflare Worker via Wrangler...");
