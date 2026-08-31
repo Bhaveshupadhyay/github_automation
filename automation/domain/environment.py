@@ -136,9 +136,11 @@ class WorkflowEnvironment(BaseModel):
 
     def __init__(self, **data):
         super().__init__(**data)
+        explicit_target = data.get("target_repo", "").strip().strip("'\"‘’“”") if data.get("target_repo") else ""
         env_target = os.getenv("TARGET_REPO", "").strip().strip("'\"‘’“”")
-        # If preflight already validated TARGET_REPO in environment, preserve it
-        if "TARGET_REPO" in os.environ and env_target != "":
+        if explicit_target:
+            self.target_repo = explicit_target
+        elif "TARGET_REPO" in os.environ and env_target != "":
             self.target_repo = env_target
         else:
             self.target_repo = extract_target_repo(self.user_prompt, env_target)

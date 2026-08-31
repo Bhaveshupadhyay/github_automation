@@ -10,6 +10,7 @@ from automation.core.dependency import (
     get_deployment_service,
     get_git_pr_service,
     get_notification_service,
+    get_telemetry_service,
     get_code_development_service,
     get_orchestration_service,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "get_deployment_service",
     "get_git_pr_service",
     "get_notification_service",
+    "get_telemetry_service",
     "get_code_development_service",
     "get_orchestration_service",
 ]

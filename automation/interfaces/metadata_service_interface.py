@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Optional
 from automation.domain import GitPRDetails
 
 class IMetadataService(ABC):
@@ -7,4 +8,9 @@ class IMetadataService(ABC):
     @abstractmethod
     def generate_metadata(self) -> GitPRDetails:
         """Generates semantic branch name, commit message, PR title, and PR description."""
+        pass
+
+    @abstractmethod
+    def find_existing_thread_branch(self) -> Optional[str]:
+        """Queries GitHub for existing PRs matching slack_thread_ts to reuse exact semantic branch name."""
         pass

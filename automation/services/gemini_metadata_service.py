@@ -49,7 +49,7 @@ class GeminiLLMMetadataService(IMetadataService):
         except Exception:
             return "Git diff summary unavailable."
 
-    def _find_existing_thread_branch(self) -> Optional[str]:
+    def find_existing_thread_branch(self) -> Optional[str]:
         """Queries GitHub for existing PRs matching slack_thread_ts to reuse exact semantic branch name."""
         if not self.config.slack_thread_ts or not self.config.target_repo:
             return None
@@ -67,7 +67,7 @@ class GeminiLLMMetadataService(IMetadataService):
                 if prs and isinstance(prs, list) and len(prs) > 0 and "headRefName" in prs[0]:
                     existing_branch = prs[0]["headRefName"]
                     if existing_branch and existing_branch.strip():
-                        logger.info(f"🔍 Found existing semantic PR branch for thread {self.config.slack_thread_ts}: {existing_branch}")
+                        logger.info(f"Found existing semantic PR branch for thread {self.config.slack_thread_ts}: {existing_branch}")
                         return existing_branch.strip()
         except Exception as e:
             logger.debug(f"Thread PR lookup exception: {e}")
@@ -76,7 +76,7 @@ class GeminiLLMMetadataService(IMetadataService):
 
     def generate_metadata(self) -> GitPRDetails:
         # 1. Reuse existing branch if explicitly provided or found via Slack thread PR metadata
-        semantic_branch = self.config.existing_branch or self._find_existing_thread_branch()
+        semantic_branch = self.config.existing_branch or self.find_existing_thread_branch()
 
         api_key = get_gemini_api_key()
         execution_summary = self._extract_agy_execution_summary()
