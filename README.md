@@ -14,6 +14,39 @@ AutoPR Slack AI is a **zero-clone, serverless autonomous AI developer pipeline**
 
 ---
 
+## Prerequisites
+
+Before running the setup wizard, you need the following tools installed and authenticated:
+
+**1. GitHub CLI**
+
+```bash
+brew install gh
+gh auth login
+```
+
+**2. Wrangler CLI (Cloudflare)**
+
+Required to deploy the edge webhook worker.
+
+```bash
+npm install -g wrangler
+wrangler login
+```
+
+**3. Google Antigravity CLI**
+
+Required for the autonomous AI execution engine. Install and authenticate it locally:
+
+```bash
+npm install -g @google/antigravity
+agy auth login
+```
+
+The wizard automatically reads your local Antigravity session (`~/.gemini/config`) and uploads it as the `AGY_AUTH_CONFIG` secret to your GitHub repository. No manual base64 encoding required.
+
+---
+
 ## Installation
 
 ```bash
