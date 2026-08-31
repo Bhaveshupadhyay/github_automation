@@ -1,6 +1,6 @@
 {
   "name": "autopr-slack",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Zero-clone autonomous AI Developer setup for Slack & GitHub Actions",
   "type": "module",
   "main": "cli/index.js",
