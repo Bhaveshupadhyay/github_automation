@@ -129,16 +129,27 @@ npx autopr-slack check
 
 ## Full Environment Variable Reference
 
-| Variable | Required | Description |
+### Local Setup (not uploaded to GitHub)
+
+These are only needed on the machine or agent environment running the setup commands. They are consumed by Wrangler during the one-time `deploy-worker` step and never stored in GitHub Secrets.
+
+| Variable | Description |
+| :--- | :--- |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with `Workers:Edit` permission. Used by Wrangler to deploy the edge worker. |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID (found in the dashboard sidebar). |
+
+### GitHub Actions Secrets (uploaded via `gh secret set`)
+
+These are provisioned into the target GitHub repository and used by the Actions workflow at runtime.
+
+| Secret | Required | Description |
 | :--- | :---: | :--- |
-| `GITHUB_TOKEN` / `PAT_TOKEN` | Yes | GitHub Classic PAT with `repo` and `workflow` scopes. |
-| `CLOUDFLARE_API_TOKEN` | Yes | Cloudflare API token with `Workers:Edit` permission. |
-| `CLOUDFLARE_ACCOUNT_ID` | Yes | Cloudflare account ID (found in the dashboard sidebar). |
+| `PAT_TOKEN` | Yes | GitHub Classic PAT with `repo` and `workflow` scopes. |
 | `SLACK_BOT_TOKEN` | Yes | Slack Bot User OAuth Token (`xoxb-...`). |
 | `SLACK_SIGNING_SECRET` | Yes | Slack Signing Secret for webhook verification. |
-| `GEMINI_API_KEY` | Optional | Gemini API Key for fast intent classification at the edge. |
 | `AGY_AUTH_CONFIG` | Yes | Base64-encoded contents of `~/.gemini/oauth_creds.json`. |
 | `AGY_SESSION_DATA` | Yes | Base64-encoded contents of `~/.gemini/antigravity-cli/antigravity-oauth-token`. |
+| `GEMINI_API_KEY` | Optional | Gemini API Key for fast intent classification at the edge. |
 
 ---
 
