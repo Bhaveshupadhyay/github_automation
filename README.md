@@ -130,3 +130,9 @@ uvx --from github-automation-ai autopr
 ## License
 
 [MIT](LICENSE)
+
+---
+
+## Docs
+
+- [Agent Setup Guide](docs/agent-setup.md) — Non-interactive setup for coding agents (Antigravity, Copilot Workspace, Devin, Cursor, etc.)
