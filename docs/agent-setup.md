@@ -23,15 +23,19 @@ gh auth login --with-token <<< "$GITHUB_TOKEN"
 
 ### Wrangler CLI (Cloudflare Workers)
 
-The Cloudflare Worker deployment step requires Wrangler authenticated with a Cloudflare API token. Do **not** use `wrangler login` (requires browser). Use the token directly:
+Required to deploy the edge webhook worker.
 
 ```bash
 npm install -g wrangler
+wrangler login
+```
+
+If running in a fully headless CI environment without browser access, you can authenticate via environment variables instead:
+
+```bash
 export CLOUDFLARE_API_TOKEN="your-cloudflare-api-token"
 export CLOUDFLARE_ACCOUNT_ID="your-cloudflare-account-id"
 ```
-
-Wrangler reads these environment variables automatically — no interactive login needed.
 
 ### Google Antigravity CLI
 
