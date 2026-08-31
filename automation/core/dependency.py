@@ -14,6 +14,7 @@ from automation.interfaces import (
     ISlackHistoryService,
     IGitPRService,
     IExecutionOutputClassifierService,
+    ITelemetryService,
 )
 
 from automation.services.passthrough_intent_router_service import PassThroughIntentRouterService
@@ -22,6 +23,7 @@ from automation.services.gemini_summarizer_service import GeminiLLMSummarizerSer
 from automation.services.code_development_service import CodeDevelopmentService
 from automation.services.deployment_service import DeploymentService
 from automation.services.notification_service import NotificationService
+from automation.services.slack_telemetry_service import SlackTelemetryService
 from automation.services.cleanup_service import WorkspaceCleanupService
 from automation.services.git_pr_service import GitPRService
 from automation.services.slack_history_service import SlackHistoryService
@@ -79,6 +81,11 @@ def get_notification_service(pr_details: Optional[GitPRDetails] = None, config: 
     return NotificationService(cfg, pr_details)
 
 
+def get_telemetry_service(config: Optional[WorkflowEnvironment] = None) -> ITelemetryService:
+    cfg = config or get_config()
+    return SlackTelemetryService(cfg)
+
+
 def get_code_development_service(config: Optional[WorkflowEnvironment] = None) -> ICodeDevelopmentService:
     cfg = config or get_config()
     return CodeDevelopmentService(
@@ -90,6 +97,7 @@ def get_code_development_service(config: Optional[WorkflowEnvironment] = None) -
         git_pr_service_factory=lambda pr_details: get_git_pr_service(pr_details, cfg),
         notification_service_factory=lambda pr_details=None: get_notification_service(pr_details, cfg),
         output_classifier=get_execution_output_classifier_service(cfg),
+        telemetry_service=get_telemetry_service(cfg),
     )
 
 
@@ -102,3 +110,4 @@ def get_orchestration_service(config: Optional[WorkflowEnvironment] = None) -> I
         code_dev_service=get_code_development_service(cfg),
         notification_service_factory=lambda pr_details=None: get_notification_service(pr_details, cfg),
     )
+

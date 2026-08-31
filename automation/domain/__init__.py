@@ -4,6 +4,7 @@ from automation.domain.intent import TaskCategory, TaskIntent
 from automation.domain.environment import extract_target_repo, WorkflowEnvironment
 from automation.domain.git import GitPRDetails
 from automation.domain.slack import SlackMessage, SlackConversationsRepliesResponse
+from automation.domain.telemetry import PipelineStage, StageStatus, TelemetryState
 
 __all__ = [
     "DEFAULT_GEMINI_MODEL",
@@ -15,4 +16,7 @@ __all__ = [
     "GitPRDetails",
     "SlackMessage",
     "SlackConversationsRepliesResponse",
+    "PipelineStage",
+    "StageStatus",
+    "TelemetryState",
 ]

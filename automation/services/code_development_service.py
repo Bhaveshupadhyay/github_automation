@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import sys
 import logging
@@ -7,6 +8,7 @@ from typing import Callable, Optional
 
 from automation.domain.constants import SpecialTags, DEFAULT_AGY_MODEL
 from automation.domain import TaskIntent, TaskCategory, WorkflowEnvironment, GitPRDetails
+from automation.domain.telemetry import PipelineStage
 from automation.interfaces import (
     ICodeDevelopmentService,
     IMetadataService,
@@ -15,6 +17,7 @@ from automation.interfaces import (
     IGitPRService,
     INotificationService,
     IExecutionOutputClassifierService,
+    ITelemetryService,
 )
 from automation.services.cleanup_service import WorkspaceCleanupService
 
@@ -32,6 +35,7 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         git_pr_service_factory: Callable[[GitPRDetails], IGitPRService],
         notification_service_factory: Callable[[Optional[GitPRDetails]], INotificationService],
         output_classifier: Optional[IExecutionOutputClassifierService] = None,
+        telemetry_service: Optional[ITelemetryService] = None,
     ):
         self.config = config
         self.cleanup_service = cleanup_service
@@ -41,6 +45,7 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         self.git_pr_service_factory = git_pr_service_factory
         self.notification_service_factory = notification_service_factory
         self.output_classifier = output_classifier
+        self.telemetry_service = telemetry_service
 
     def _run_graphify(self, args: list) -> subprocess.CompletedProcess:
         """Helper executing graphify CLI via uv root project virtualenv or global binary."""
@@ -72,8 +77,58 @@ class CodeDevelopmentService(ICodeDevelopmentService):
 
         return "agy"
 
+    def _parse_activity_line(self, line: str) -> Optional[str]:
+        """Extracts concise agent activity description from agy CLI stdout line."""
+        raw = line.strip()
+        if not raw:
+            return None
+
+        # 1. File edits / writes
+        if any(kw in raw for kw in ("replace_file_content", "write_to_file", "Editing file", "Edited")):
+            m = re.search(r"(?:\bTargetFile\b|\bTargetPath\b|\bfile\b|\bEditing file\b)[\s:=]+['\"]?([a-zA-Z0-9_./\-]+)", raw, re.IGNORECASE)
+            if m:
+                filename = os.path.basename(m.group(1))
+                return f"Editing {filename}"
+            return "Editing workspace files"
+
+        # 2. File reads / views
+        if any(kw in raw for kw in ("view_file", "Viewing file", "read_file")):
+            m = re.search(r"(?:\bAbsolutePath\b|\bTargetFile\b|\bfile\b|\bViewing file\b)[\s:=]+['\"]?([a-zA-Z0-9_./\-]+)", raw, re.IGNORECASE)
+            if m:
+                filename = os.path.basename(m.group(1))
+                return f"Reading {filename}"
+            return "Reading workspace files"
+
+        # 3. Searches
+        if any(kw in raw for kw in ("grep_search", "find_by_name", "Searching")):
+            m = re.search(r"(?:\bQuery\b|\bPattern\b|\bSearching\b)[\s:=]+['\"]?([^'\"\}]+)", raw, re.IGNORECASE)
+            if m:
+                query = m.group(1).strip()[:25]
+                return f"Searching '{query}'"
+            return "Searching codebase"
+
+        # 4. Command execution
+        if any(kw in raw for kw in ("run_command", "CommandLine", "Running command")):
+            m = re.search(r"(?:\bCommandLine\b|\bcommand\b|\bRunning command\b)[\s:=]+['\"]?([^'\"\}]+)", raw, re.IGNORECASE)
+            if m:
+                cmd = m.group(1).strip()[:30]
+                return f"Running `{cmd}`"
+            return "Running build command"
+
+        # 5. Planning / Thinking
+        if "thinking" in raw.lower() or "planning" in raw.lower():
+            return "Synthesizing code architecture"
+
+        return None
+
     def execute_pipeline(self) -> None:
-        logger.info("🛠️ Executing Code Development Pipeline (Graphify AST + agy Engine + Git Branch & PR)...")
+        logger.info("Executing Code Development Pipeline (Graphify AST + agy Engine + Git Branch & PR)...")
+
+        # Step 0: Check for existing thread branch and initialize Slack telemetry card
+        existing_branch = self.config.existing_branch or self.metadata_service.find_existing_thread_branch()
+        is_update_run = bool(existing_branch)
+        if self.telemetry_service:
+            self.telemetry_service.initialize_card(is_update_run=is_update_run, existing_branch=existing_branch)
 
         # Step 1: Clean up workspace unwanted files
         self.cleanup_service.cleanup_unwanted_files()
@@ -88,14 +143,17 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             logger.debug(f"Slack history lookup skipped: {e}")
 
         # Step 3: Build & Query Graphify AST Knowledge Graph
-        logger.info("📊 Generating Graphify AST Knowledge Graph...")
+        if self.telemetry_service:
+            self.telemetry_service.update_stage(PipelineStage.GRAPHIFY_AST, "Building AST knowledge graph...")
+
+        logger.info("Generating Graphify AST Knowledge Graph...")
         self._run_graphify(["graphify", "update", "."])
         
         graph_context = ""
         graph_res = self._run_graphify(["graphify", "query", self.config.user_prompt])
         if graph_res.returncode == 0 and graph_res.stdout.strip():
             graph_context = graph_res.stdout.strip()
-            logger.info(f"🔍 Extracted Graphify AST Context ({len(graph_context)} chars).")
+            logger.info(f"Extracted Graphify AST Context ({len(graph_context)} chars).")
 
         # Step 4: Non-destructively inject framework rules and skills into workspace
         for agent_sub in ["rules", "skills"]:
@@ -113,8 +171,11 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         agy_model = DEFAULT_AGY_MODEL
         effort_val = self.config.effort_val if self.config.effort_val else "high"
         
-        logger.info(f"🤖 Executing Native Antigravity CLI (agy) with model {agy_model}, --effort {effort_val}, --add-dir ., --print-timeout 15m0s...")
+        logger.info(f"Executing Native Antigravity CLI (agy) with model {agy_model}, --effort {effort_val}, --add-dir ., --print-timeout 15m0s...")
         
+        if self.telemetry_service:
+            self.telemetry_service.update_stage(PipelineStage.AGY_EXECUTION, f"Executing {agy_model}...")
+
         agy_bin = self._resolve_agy_binary()
         cmd = [
             agy_bin, "--print", full_prompt,
@@ -134,19 +195,33 @@ class CodeDevelopmentService(ICodeDevelopmentService):
                 log_file.write(line)
                 if len(agy_output_lines) < 200:
                     agy_output_lines.append(line)
+
+                # Real-time stdout activity telemetry streaming
+                if self.telemetry_service:
+                    activity = self._parse_activity_line(line)
+                    if activity:
+                        self.telemetry_service.stream_activity(activity)
+
             proc.wait()
 
         if proc.returncode != 0:
-            logger.error(f"❌ agy engine execution failed with exit code {proc.returncode}. Aborting PR pipeline.")
+            logger.error(f"agy engine execution failed with exit code {proc.returncode}. Aborting PR pipeline.")
+            if self.telemetry_service:
+                self.telemetry_service.fail(f"agy engine failed (exit code {proc.returncode})")
             return
 
         agy_full_output = "".join(agy_output_lines).strip()
 
         # Step 6: Evaluate agy CLI execution output intent semantically via injected classifier service
+        if self.telemetry_service:
+            self.telemetry_service.update_stage(PipelineStage.OUTPUT_VALIDATION, "Validating output intent...")
+
         if self.output_classifier:
             is_clarification, question = self.output_classifier.classify_output_intent(agy_full_output)
             if is_clarification and question:
-                logger.info(f"❓ agy requested clarification (LLM Verified): {question}")
+                logger.info(f"agy requested clarification (LLM Verified): {question}")
+                if self.telemetry_service:
+                    self.telemetry_service.request_clarification(question)
                 clarification_intent = TaskIntent(
                     category=TaskCategory.CLARIFICATION_NEEDED,
                     confidence=1.0,
@@ -161,15 +236,20 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         self.cleanup_service.cleanup_unwanted_files()
 
         # Step 8: Resolve Gemini LLM Metadata Service & Git PR Service
+        if self.telemetry_service:
+            self.telemetry_service.update_stage(PipelineStage.GIT_PR_CREATION, "Synthesizing metadata and checking git changes...")
+
         pr_details = self.metadata_service.generate_metadata()
 
         git_service = self.git_pr_service_factory(pr_details)
         if not git_service.has_changes():
-            logger.info("ℹ️ No file changes were produced by the agent.")
+            logger.info("No file changes were produced by the agent.")
             # Use decoupled ISummarizerService to summarize verbose CLI output into a clean 1-sentence question
             concise_question = self.summarizer_service.summarize_clarification(agy_full_output)
             
-            logger.info(f"💬 Relaying concise clarification question to Slack thread: '{concise_question}'")
+            logger.info(f"Relaying concise clarification question to Slack thread: '{concise_question}'")
+            if self.telemetry_service:
+                self.telemetry_service.request_clarification(concise_question)
             clarification_intent = TaskIntent(
                 category=TaskCategory.CLARIFICATION_NEEDED,
                 confidence=1.0,
@@ -180,10 +260,18 @@ class CodeDevelopmentService(ICodeDevelopmentService):
             notifier.send_clarification_notification(clarification_intent)
             return
 
+        if self.telemetry_service:
+            self.telemetry_service.update_stage(PipelineStage.GIT_PR_CREATION, f"Pushing branch '{pr_details.branch_name}'...")
+
         git_service.create_and_push_branch()
         pr_url = git_service.create_pull_request()
 
-        # Step 9: Post PR notification
+        # Step 9: Post PR notification and finalize telemetry
         if pr_url:
+            if self.telemetry_service:
+                self.telemetry_service.complete(pr_url=pr_url, branch_name=pr_details.branch_name)
             notifier = self.notification_service_factory(pr_details)
             notifier.send_pr_notification(pr_url)
+        else:
+            if self.telemetry_service:
+                self.telemetry_service.fail("Failed to create Pull Request on GitHub")

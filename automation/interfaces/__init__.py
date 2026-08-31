@@ -9,6 +9,7 @@ from automation.interfaces.notification_interface import INotificationService
 from automation.interfaces.slack_history_interface import ISlackHistoryService
 from automation.interfaces.git_pr_interface import IGitPRService
 from automation.interfaces.execution_output_classifier_interface import IExecutionOutputClassifierService
+from automation.interfaces.telemetry_interface import ITelemetryService
 
 __all__ = [
     "ICodeDevelopmentService",
@@ -21,4 +22,5 @@ __all__ = [
     "ISlackHistoryService",
     "IGitPRService",
     "IExecutionOutputClassifierService",
+    "ITelemetryService",
 ]
