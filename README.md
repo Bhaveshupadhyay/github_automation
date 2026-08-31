@@ -18,7 +18,7 @@ No manual cloning, no local Python environment setup, and zero runner compute co
 
 ## ⚡ 1-Command Quickstart (Zero-Clone Setup)
 
-You don't need to clone this repository. Open your terminal inside any GitHub repository (or any empty folder) and run:
+You do not need to clone this repository. Run the setup wizard from any directory:
 
 ```bash
 npx autopr-slack
@@ -26,7 +26,7 @@ npx autopr-slack
 
 *(or `npx autopr-slack init`)*
 
-The interactive wizard configures your entire autonomous developer pipeline in **5 guided steps**:
+The interactive wizard configures your autonomous developer pipeline in **5 guided steps**:
 
 ```text
 ╔═══════════════════════════════════════════════════════════════╗
@@ -41,21 +41,21 @@ The interactive wizard configures your entire autonomous developer pipeline in *
   ✔ Git CLI & GitHub CLI (gh) authenticated
   ✔ Target Repository: your-org/your-repo
 
-[2/5] Cloudflare Worker Fast-Path Deployment
+[2/5] Workflow Selection & Installation
+  ✔ Installs .github/workflows/autopr.yml (PyPI uvx, reusable, or standalone)
+  ✔ Pushes workflow directly to your remote repository via GitHub API
+
+[3/5] Cloudflare Worker Fast-Path Deployment
   ✔ Deploys serverless edge webhook via Wrangler (zero idle server costs)
   ✔ Output endpoint: https://autopr-your-repo.subdomain.workers.dev
 
-[3/5] 1-Click Slack App Manifest Generation
+[4/5] 1-Click Slack App Manifest Generation
   ✔ Generates slack-app-manifest.json with pre-configured /code slash commands,
     event subscriptions, and bot scopes
 
-[4/5] GitHub Repository Secrets Provisioning
+[5/5] Secrets Provisioning
   ✔ Automatically provisions PAT_TOKEN, SLACK_BOT_TOKEN, and AGY_AUTH_CONFIG
-    directly to your GitHub repository via gh CLI
-
-[5/5] GitHub Actions Workflow Injection
-  ✔ Injects .github/workflows/autopr.yml using ultra-fast uvx execution
-  ✔ Auto-pushes workflow to your remote GitHub repository
+    directly to GitHub and Cloudflare
 ```
 
 ---
@@ -71,23 +71,24 @@ npx autopr-slack
 ```
 
 The wizard will prompt you for:
-- **GitHub Workflow Target Repository**: `owner/repo` (auto-detected if inside a git repo).
+- **GitHub Workflow Target Repository**: `owner/repo` (auto-detected if inside a git repository).
+- **Workflow Installation Mode**: PyPI `uvx` (recommended), Reusable caller, or Standalone. When authenticated with `gh`, the wizard automatically pushes the workflow to your remote repository.
 - **Cloudflare Worker Name**: Custom name or default `autopr-<repo>`.
 - **GitHub Personal Access Token (PAT)**: Classic token with `repo` and `workflow` scopes.
-- **Gemini API Key / Antigravity Config**: For intent classification and headless engine reasoning.
+- **Gemini API Key / Antigravity Config**: For intent classification and engine reasoning.
 
 ---
 
 ### Step 2: Create the Slack App (1-Click Manifest)
 
-The wizard creates a file named `slack-app-manifest.json` in your project folder.
+The wizard creates `slack-app-manifest.json` in your current working directory.
 
 1. Go to [**api.slack.com/apps**](https://api.slack.com/apps) and click **Create New App**.
 2. Select **From an app manifest**.
 3. Choose your Slack workspace.
 4. Open `slack-app-manifest.json`, copy its entire content, and paste it into Slack.
 5. Click **Create**, then click **Install to Workspace**.
-6. Copy your **Bot User OAuth Token** (`xoxb-...`) and **Signing Secret** back into the terminal wizard (or run `npx autopr-slack secrets`).
+6. Copy both your **Bot User OAuth Token** (`xoxb-...`) and **Signing Secret** back into the terminal wizard (or configure via `npx autopr-slack secrets`).
 
 ---
 
@@ -99,7 +100,7 @@ In your Slack workspace:
 
 ---
 
-### Step 4: Issue Commands & Watch PRs Open Automatically!
+### Step 4: Issue Commands & Watch PRs Open Automatically
 
 Type a slash command directly in Slack:
 
@@ -116,9 +117,9 @@ Or target any repository dynamically:
 #### What happens next:
 1. **Sub-second Edge Acknowledgement**: Cloudflare Worker validates the request in `<50ms` and replies in your Slack thread with a progress indicator.
 2. **Intent & Repository Resolution**: Gemini extracts repository targets, branches, and task constraints.
-3. **Graphify AST Indexing**: Actions runner constructs a lightweight AST knowledge graph of the target repository, reducing token overhead by up to 50%.
-4. **Antigravity AI Engine (`agy`)**: Generates precision code diffs, runs test suites (`pytest`, `npm test`, etc.), and verifies fixes with zero regressions.
-5. **Verified PR Created**: Pushes a new feature branch, opens a GitHub Pull Request, and posts the PR link and AI summary directly back into your Slack thread!
+3. **Graphify AST Indexing**: Actions runner constructs an AST knowledge graph of the target repository, reducing token overhead by up to 50%.
+4. **Antigravity AI Engine (`agy`)**: Generates precision code diffs, runs test suites, and verifies fixes with zero regressions.
+5. **Verified PR Created**: Pushes a new feature branch, opens a GitHub Pull Request, and posts the PR link and AI summary directly back into your Slack thread.
 
 ---
 
@@ -129,10 +130,10 @@ In addition to the master wizard, you can run individual modules on demand:
 | Command | Description |
 | :--- | :--- |
 | `npx autopr-slack init` | Runs the full 5-step interactive setup wizard. |
-| `npx autopr-slack workflow` | Injects the GitHub Actions workflow into current repository. |
+| `npx autopr-slack workflow` | Injects the GitHub Actions workflow into the target repository. |
 | `npx autopr-slack deploy-worker` | Builds and deploys the Cloudflare Worker serverless edge webhook. |
 | `npx autopr-slack manifest` | Generates a 1-click Slack App Manifest JSON file. |
-| `npx autopr-slack secrets` | Configures GitHub Actions and Cloudflare secrets via `gh` CLI. |
+| `npx autopr-slack secrets` | Configures GitHub repository secrets via `gh` CLI. |
 | `npx autopr-slack check` | Runs system diagnostics and preflight credential checks. |
 
 ---
@@ -191,7 +192,7 @@ All sensitive keys remain strictly inside your private GitHub Repository Secrets
 
 | Secret Name | Purpose |
 | :--- | :--- |
-| `PAT_TOKEN` | GitHub Personal Access Token (Classic) with `repo`, `workflow`, and `write:packages` scopes. |
+| `PAT_TOKEN` | GitHub Personal Access Token (Classic) with `repo` and `workflow` scopes. |
 | `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (`xoxb-...`) for posting threaded replies. |
 | `SLACK_SIGNING_SECRET` | Slack Signing Secret for cryptographic webhook signature verification. |
 | `AGY_AUTH_CONFIG` | Base64-encoded session configuration file (`~/.gemini/config`) for Google Antigravity CLI. |

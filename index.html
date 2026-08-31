@@ -428,10 +428,10 @@
             </div>
             <ul style="color: var(--text-muted); margin: 1rem 0 0 1.5rem; line-height: 1.8; font-size: 0.95rem;">
               <li><strong>Step 1:</strong> Preflight environment &amp; target repo diagnostics.</li>
-              <li><strong>Step 2:</strong> Deploys Cloudflare Worker edge webhook (sub-50ms routing).</li>
-              <li><strong>Step 3:</strong> Generates 1-click <code>slack-app-manifest.json</code>.</li>
-              <li><strong>Step 4:</strong> Provisions GitHub &amp; Cloudflare secrets via <code>gh</code> CLI.</li>
-              <li><strong>Step 5:</strong> Injects reusable GitHub Actions execution workflow (using <code>uvx</code>).</li>
+              <li><strong>Step 2:</strong> Workflow selection &amp; installation (PyPI uvx, reusable, or standalone).</li>
+              <li><strong>Step 3:</strong> Deploys Cloudflare Worker edge webhook (sub-50ms routing).</li>
+              <li><strong>Step 4:</strong> Generates 1-click <code>slack-app-manifest.json</code>.</li>
+              <li><strong>Step 5:</strong> Provisions GitHub &amp; Cloudflare secrets via <code>gh</code> CLI.</li>
             </ul>
           </div>
 
@@ -445,7 +445,7 @@
               <li>Go to <a href="https://api.slack.com/apps" target="_blank" style="color: #38bdf8; text-decoration: underline;">api.slack.com/apps</a> and click <strong>Create New App</strong>.</li>
               <li>Select <strong>From an app manifest</strong> and choose your Slack workspace.</li>
               <li>Paste the contents of <code>slack-app-manifest.json</code> and click <strong>Create</strong>.</li>
-              <li>Click <strong>Install to Workspace</strong> and copy your Bot Token (<code>xoxb-...</code>).</li>
+              <li>Click <strong>Install to Workspace</strong> and copy your Bot User OAuth Token (<code>xoxb-...</code>) and Signing Secret.</li>
             </ol>
             <div class="code-block" style="margin-top: 1rem;">
               <code>npx autopr-slack manifest</code>
