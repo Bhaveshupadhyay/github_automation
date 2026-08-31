@@ -16,7 +16,7 @@ No manual cloning, no local Python environment setup, and zero runner compute co
 
 ---
 
-## ⚡ 1-Command Quickstart (Zero-Clone Setup)
+## 1-Command Quickstart (Zero-Clone Setup)
 
 You do not need to clone this repository. Run the setup wizard from any directory:
 
@@ -29,38 +29,36 @@ npx autopr-slack
 The interactive wizard configures your autonomous developer pipeline in **5 guided steps**:
 
 ```text
-╔═══════════════════════════════════════════════════════════════╗
-║                                                               ║
-║   ⚡ AutoPR Slack AI — Autonomous AI Developer               ║
-║   Zero-Clone Edge & GitHub Actions Setup Wizard               ║
-║                                                               ║
-╚═══════════════════════════════════════════════════════════════╝
+=================================================================
+   AutoPR Slack AI — Autonomous AI Developer
+   Zero-Clone Edge & GitHub Actions Setup Wizard
+=================================================================
 
 [1/5] Diagnostics & Target Repository Resolution
-  ✔ Node.js Runtime: v22.x
-  ✔ Git CLI & GitHub CLI (gh) authenticated
-  ✔ Target Repository: your-org/your-repo
+  - Node.js Runtime: v22.x
+  - Git CLI & GitHub CLI (gh) authenticated
+  - Target Repository: your-org/your-repo
 
 [2/5] Workflow Selection & Installation
-  ✔ Installs .github/workflows/autopr.yml (PyPI uvx, reusable, or standalone)
-  ✔ Pushes workflow directly to your remote repository via GitHub API
+  - Installs .github/workflows/autopr.yml (PyPI uvx, reusable, or standalone)
+  - Pushes workflow directly to your remote repository via GitHub API
 
 [3/5] Cloudflare Worker Fast-Path Deployment
-  ✔ Deploys serverless edge webhook via Wrangler (zero idle server costs)
-  ✔ Output endpoint: https://autopr-your-repo.subdomain.workers.dev
+  - Deploys serverless edge webhook via Wrangler (zero idle server costs)
+  - Output endpoint: https://autopr-your-repo.subdomain.workers.dev
 
 [4/5] 1-Click Slack App Manifest Generation
-  ✔ Generates slack-app-manifest.json with pre-configured /code slash commands,
+  - Generates slack-app-manifest.json with pre-configured /code slash commands,
     event subscriptions, and bot scopes
 
 [5/5] Secrets Provisioning
-  ✔ Automatically provisions PAT_TOKEN, SLACK_BOT_TOKEN, and AGY_AUTH_CONFIG
+  - Automatically provisions PAT_TOKEN, SLACK_BOT_TOKEN, and AGY_AUTH_CONFIG
     directly to GitHub and Cloudflare
 ```
 
 ---
 
-## 📖 End-to-End Setup Instructions (Start to Finish)
+## End-to-End Setup Instructions (Start to Finish)
 
 ### Step 1: Run the Setup Wizard
 
@@ -114,7 +112,7 @@ Or target any repository dynamically:
 /code org/api-gateway Fix race condition in authentication token refresh
 ```
 
-#### What happens next:
+#### Execution Lifecycle:
 1. **Sub-second Edge Acknowledgement**: Cloudflare Worker validates the request in `<50ms` and replies in your Slack thread with a progress indicator.
 2. **Intent & Repository Resolution**: Gemini extracts repository targets, branches, and task constraints.
 3. **Graphify AST Indexing**: Actions runner constructs an AST knowledge graph of the target repository, reducing token overhead by up to 50%.
@@ -123,7 +121,7 @@ Or target any repository dynamically:
 
 ---
 
-## 🛠️ CLI Subcommands & Tooling
+## CLI Subcommands & Tooling
 
 In addition to the master wizard, you can run individual modules on demand:
 
@@ -138,7 +136,7 @@ In addition to the master wizard, you can run individual modules on demand:
 
 ---
 
-## 🐍 Python Engine via PyPI (`uvx`)
+## Python Engine via PyPI (uvx)
 
 The core execution engine is also published on PyPI as [`github-automation-ai`](https://pypi.org/project/github-automation-ai/):
 
@@ -152,7 +150,7 @@ uvx --from github-automation-ai python -m automation.preflight --prompt "org/rep
 
 ---
 
-## 🏛️ System Architecture
+## System Architecture
 
 ```text
 +---------------------+
@@ -186,7 +184,7 @@ uvx --from github-automation-ai python -m automation.preflight --prompt "org/rep
 
 ---
 
-## 🔐 Environment & Security Configuration
+## Environment & Security Configuration
 
 All sensitive keys remain strictly inside your private GitHub Repository Secrets and Cloudflare Worker environment:
 
@@ -200,7 +198,7 @@ All sensitive keys remain strictly inside your private GitHub Repository Secrets
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository and create a feature branch (`git checkout -b feat/your-feature`).
 2. Follow Clean Architecture and PEP 8 conventions.
@@ -209,6 +207,6 @@ All sensitive keys remain strictly inside your private GitHub Repository Secrets
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
