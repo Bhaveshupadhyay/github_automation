@@ -25,6 +25,8 @@ dependencies = [
 autopr = "automation.main:main"
 github-automation = "automation.main:main"
 github-automation-ai = "automation.main:main"
+qa-contract = "automation.qa_contract_cli:main"
+secret-drift = "automation.secret_drift_cli:main"
 
 
 [build-system]

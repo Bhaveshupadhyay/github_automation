@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/bhaveshupadhyay/github_automation/main/qa-contract.schema.json",
+  "title": "QA Contract Specification",
+  "description": "Declarative service configuration schema establishing the operational contract for autonomous QA preview and demo recording across Frontend, Backend, and Mobile repositories.",
+  "type": "object",
+  "required": [
+    "serviceType",
+    "port",
+    "healthCheckUrl"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URI reference to this JSON schema"
+    },
+    "serviceType": {
+      "type": "string",
+      "enum": ["backend", "frontend", "mobile"],
+      "description": "Category of the application service under test"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "Localhost TCP port number the service binds and listens on"
+    },
+    "healthCheckUrl": {
+      "type": "string",
+      "description": "HTTP readiness probe URL path (e.g., /health) or full localhost address"
+    },
+    "lifecycle": {
+      "type": "object",
+      "description": "Lifecycle command hooks for service provisioning and execution",
+      "required": ["start"],
+      "properties": {
+        "prepare": {
+          "type": "string",
+          "description": "Command to install dependencies, compile assets, or execute database migrations prior to launch"
+        },
+        "start": {
+          "type": "string",
+          "description": "Command to start the service process"
+        }
+      },
+      "additionalProperties": false
+    },
+    "prepare": {
+      "type": "string",
+      "description": "Shortcut hook for lifecycle.prepare"
+    },
+    "start": {
+      "type": "string",
+      "description": "Shortcut hook for lifecycle.start"
+    },
+    "apiBaseUrlEnvVar": {
+      "type": "string",
+      "description": "Mandatory for frontend services: Name of the environment variable used to override backend API base URL at build/runtime (e.g., NEXT_PUBLIC_API_URL, VITE_API_URL)"
+    },
+    "mobileConfig": {
+      "type": "object",
+      "description": "Mandatory for mobile services: Platform, bundle ID, and build output binary path",
+      "required": [
+        "platform",
+        "bundleId",
+        "buildOutputPath"
+      ],
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "both"],
+          "description": "Target mobile operating system platform"
+        },
+        "bundleId": {
+          "type": "string",
+          "description": "Application package or bundle identifier (e.g., com.example.app)"
+        },
+        "buildOutputPath": {
+          "type": "string",
+          "description": "Relative path to the compiled debug binary (.apk, .aab, or .app)"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "serviceType": { "const": "frontend" } }
+      },
+      "then": {
+        "required": ["apiBaseUrlEnvVar"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "serviceType": { "const": "mobile" } }
+      },
+      "then": {
+        "required": ["mobileConfig"]
+      }
+    },
+    {
+      "anyOf": [
+        { "required": ["lifecycle"] },
+        { "required": ["start"] }
+      ]
+    }
+  ],
+  "additionalProperties": false
+}

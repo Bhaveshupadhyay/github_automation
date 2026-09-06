@@ -13,6 +13,10 @@ from automation.core.dependency import (
     get_telemetry_service,
     get_code_development_service,
     get_orchestration_service,
+    get_sops_service,
+    get_secret_drift_detector_service,
+    get_qa_contract_validator_service,
+    get_health_check_service,
 )
 
 __all__ = [
@@ -30,4 +34,8 @@ __all__ = [
     "get_telemetry_service",
     "get_code_development_service",
     "get_orchestration_service",
+    "get_sops_service",
+    "get_secret_drift_detector_service",
+    "get_qa_contract_validator_service",
+    "get_health_check_service",
 ]

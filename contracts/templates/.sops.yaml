@@ -1,0 +1,5 @@
+# Mozilla SOPS configuration for Autonomous QA & Demo Video Pipeline
+# Secures .env.qa.enc with Age asymmetric encryption and AES-256-GCM
+creation_rules:
+  - path_regex: \.env\.qa(\.enc)?$
+    age: "age1kaxwvfp8lpf9gpk2cd4swsyehvkuwvjdrqxlwgyvr2l5dv2x9cfszvkt8k"

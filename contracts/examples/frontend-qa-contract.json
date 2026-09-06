@@ -1,0 +1,11 @@
+{
+  "$schema": "../../qa-contract.schema.json",
+  "serviceType": "frontend",
+  "port": 3000,
+  "healthCheckUrl": "/",
+  "apiBaseUrlEnvVar": "NEXT_PUBLIC_API_URL",
+  "lifecycle": {
+    "prepare": "npm ci && npm run build",
+    "start": "npm run start -- -p 3000"
+  }
+}
