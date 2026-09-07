@@ -146,6 +146,15 @@ class BranchResolverService(IBranchResolver):
             )
             return False
 
+    @staticmethod
+    def _clean_json_markdown(text: str) -> str:
+        """Strips markdown code fences (```json ... ```) from model text output."""
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+            cleaned = re.sub(r"\s*```$", "", cleaned)
+        return cleaned.strip()
+
     def _is_ambiguous_or_negated(self, pr_body: str, candidate_ref: str) -> bool:
         """Detects if a candidate branch in PR body is negated, crossed-out, or ambiguous."""
         body_lower = pr_body.lower()
@@ -236,8 +245,7 @@ class BranchResolverService(IBranchResolver):
                     config={"response_mime_type": "application/json"},
                 )
                 raw_text = response.text if hasattr(response, "text") else str(response)
-                parsed = json.loads(raw_text)
-                ai_extracted = AIExtractedBranch(**parsed)
+                ai_extracted = AIExtractedBranch.model_validate_json(self._clean_json_markdown(raw_text))
             except Exception as e:
                 logger.warning(f"Injected genai_client call failed: {e}")
         elif genai is not None:
@@ -261,8 +269,9 @@ class BranchResolverService(IBranchResolver):
                 if response.parsed and isinstance(response.parsed, AIExtractedBranch):
                     ai_extracted = response.parsed
                 elif response.text:
-                    parsed = json.loads(response.text)
-                    ai_extracted = AIExtractedBranch(**parsed)
+                    ai_extracted = AIExtractedBranch.model_validate_json(
+                        self._clean_json_markdown(response.text)
+                    )
             except Exception as e:
                 logger.warning(f"google-genai SDK call failed: {e}. Trying REST fallback...")
 
@@ -290,8 +299,9 @@ class BranchResolverService(IBranchResolver):
                         parts = candidates[0].get("content", {}).get("parts", [])
                         if parts:
                             raw_text = parts[0].get("text", "").strip()
-                            parsed_json = json.loads(raw_text)
-                            ai_extracted = AIExtractedBranch(**parsed_json)
+                            ai_extracted = AIExtractedBranch.model_validate_json(
+                                self._clean_json_markdown(raw_text)
+                            )
             except Exception as e:
                 logger.warning(f"REST Gemini API fallback failed: {e}")
 
