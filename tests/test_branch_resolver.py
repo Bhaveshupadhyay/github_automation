@@ -253,6 +253,64 @@ class TestBranchResolverService(unittest.TestCase):
         exists = self.service.check_remote_branch_exists(self.backend_url, "feat/any")
         self.assertFalse(exists)
 
+    # -------------------------------------------------------------------------
+    # Smart Hybrid AI Disambiguation & Semantic Extraction Tests
+    # -------------------------------------------------------------------------
+
+    @patch.object(BranchResolverService, "extract_branch_with_ai")
+    def test_smart_hybrid_disambiguation_negated_branch(self, mock_ai: MagicMock) -> None:
+        mock_ai.return_value = ("feat/v2-auth", {"ai_confidence": 0.95, "ai_reasoning": "Selected non-negated branch"})
+        pr_body = "Backend Branch: feat/old-auth, but please do not use that. Instead use feat/v2-auth."
+
+        result = self.service.resolve_branch(
+            pr_body=pr_body,
+            source_branch=self.source_branch,
+            backend_repo_url=self.backend_url,
+        )
+        self.assertEqual(result.target_branch, "feat/v2-auth")
+        self.assertEqual(result.resolution_source, ResolutionSource.AI_SEMANTIC_EXTRACTION)
+        self.assertEqual(result.details.get("ai_confidence"), 0.95)
+
+    @patch.object(BranchResolverService, "extract_branch_with_ai")
+    def test_smart_hybrid_conversational_extraction(self, mock_ai: MagicMock) -> None:
+        mock_ai.return_value = ("feat/alice-orders", {"ai_confidence": 0.9, "ai_reasoning": "Extracted from text"})
+        pr_body = "This frontend changes rely on Alice's unmerged work in backend branch feat/alice-orders."
+
+        result = self.service.resolve_branch(
+            pr_body=pr_body,
+            source_branch=self.source_branch,
+            backend_repo_url=self.backend_url,
+        )
+        self.assertEqual(result.target_branch, "feat/alice-orders")
+        self.assertEqual(result.resolution_source, ResolutionSource.AI_SEMANTIC_EXTRACTION)
+
+    @patch.object(BranchResolverService, "check_remote_branch_exists")
+    def test_ai_grounding_rejects_hallucinated_branch(self, mock_check: MagicMock) -> None:
+        # Simulate check_remote_branch_exists: 'feat/hallucinated' does not exist, but 'dev' exists
+        mock_check.side_effect = lambda url, branch: branch == "dev"
+
+        # Inject a mock genai client that returns a hallucinated branch
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = '{"target_branch": "feat/hallucinated", "confidence": 0.95, "reasoning": "Made up"}'
+        mock_client.models.generate_content.return_value = mock_response
+
+        service_with_ai = BranchResolverService(
+            command_timeout_seconds=2.0,
+            api_key="fake-key-123",
+            genai_client=mock_client,
+        )
+
+        result = service_with_ai.resolve_branch(
+            pr_body="Depends on backend branch feat/hallucinated",
+            source_branch="feat/frontend-widget",
+            backend_repo_url=self.backend_url,
+            default_branch="dev",
+        )
+        # Because feat/hallucinated does not exist on remote, it must be safely rejected and fall back to 'dev'
+        self.assertEqual(result.target_branch, "dev")
+        self.assertEqual(result.resolution_source, ResolutionSource.DEFAULT_FALLBACK)
+
 
 class TestBranchResolverCLI(unittest.TestCase):
     """Test suite for CLI execution and output formats."""

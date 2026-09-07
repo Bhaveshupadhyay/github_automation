@@ -7,8 +7,18 @@ from pydantic import BaseModel, Field
 class ResolutionSource(str, Enum):
     """Source strategy through which the backend branch was resolved."""
     EXPLICIT_PR_BODY = "explicit_pr_body"
+    AI_SEMANTIC_EXTRACTION = "ai_semantic_extraction"
     REMOTE_BRANCH_MATCH = "remote_branch_match"
     DEFAULT_FALLBACK = "default_fallback"
+
+
+class AIExtractedBranch(BaseModel):
+    """Structured branch dependency extracted via Gemini semantic analysis."""
+    target_branch: Optional[str] = Field(None, description="Extracted backend branch name")
+    target_pr_number: Optional[int] = Field(None, description="Extracted backend PR number")
+    confidence: float = Field(default=0.0, description="Confidence score from 0.0 to 1.0")
+    reasoning: str = Field(default="", description="Explanation of how the target branch was determined")
+    is_negated_or_deprecated: bool = Field(default=False, description="Whether the branch is explicitly rejected or obsolete")
 
 
 class BranchResolutionResult(BaseModel):

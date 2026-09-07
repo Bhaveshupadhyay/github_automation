@@ -142,8 +142,18 @@ def get_health_check_service(default_timeout: float = 30.0, default_interval: fl
     return HealthCheckService(default_timeout=default_timeout, default_interval=default_interval)
 
 
-def get_branch_resolver_service(command_timeout_seconds: float = 5.0) -> IBranchResolver:
+def get_branch_resolver_service(
+    command_timeout_seconds: float = 5.0,
+    api_key: Optional[str] = None,
+    gemini_model: Optional[str] = None,
+    genai_client: Optional[object] = None,
+) -> IBranchResolver:
     """Returns IBranchResolver implementation."""
-    return BranchResolverService(command_timeout_seconds=command_timeout_seconds)
+    return BranchResolverService(
+        command_timeout_seconds=command_timeout_seconds,
+        api_key=api_key,
+        gemini_model=gemini_model,
+        genai_client=genai_client,
+    )
 
 
