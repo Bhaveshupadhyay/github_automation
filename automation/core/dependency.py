@@ -15,6 +15,10 @@ from automation.interfaces import (
     IGitPRService,
     IExecutionOutputClassifierService,
     ITelemetryService,
+    IQAContractValidatorService,
+    ISecretDriftDetectorService,
+    ISOpsService,
+    IHealthCheckService,
 )
 
 from automation.services.passthrough_intent_router_service import PassThroughIntentRouterService
@@ -29,6 +33,10 @@ from automation.services.git_pr_service import GitPRService
 from automation.services.slack_history_service import SlackHistoryService
 from automation.services.orchestration_service import TaskOrchestrationService
 from automation.services.gemini_execution_output_classifier_service import GeminiExecutionOutputClassifierService
+from automation.services.qa_contract_service import QAContractValidatorService
+from automation.services.secret_drift_service import SecretDriftDetectorService
+from automation.services.sops_service import SOpsService
+from automation.services.health_check_service import HealthCheckService
 
 
 @lru_cache(maxsize=1)
@@ -110,4 +118,25 @@ def get_orchestration_service(config: Optional[WorkflowEnvironment] = None) -> I
         code_dev_service=get_code_development_service(cfg),
         notification_service_factory=lambda pr_details=None: get_notification_service(pr_details, cfg),
     )
+
+
+def get_sops_service(sops_binary: Optional[str] = None) -> ISOpsService:
+    """Returns ISOpsService implementation."""
+    return SOpsService(sops_binary=sops_binary)
+
+
+def get_secret_drift_detector_service(sops_service: Optional[ISOpsService] = None) -> ISecretDriftDetectorService:
+    """Returns ISecretDriftDetectorService implementation."""
+    return SecretDriftDetectorService(sops_service=sops_service or get_sops_service())
+
+
+def get_qa_contract_validator_service(schema_path: Optional[str] = None) -> IQAContractValidatorService:
+    """Returns IQAContractValidatorService implementation."""
+    return QAContractValidatorService(schema_path=schema_path)
+
+
+def get_health_check_service(default_timeout: float = 30.0, default_interval: float = 1.0) -> IHealthCheckService:
+    """Returns IHealthCheckService implementation."""
+    return HealthCheckService(default_timeout=default_timeout, default_interval=default_interval)
+
 

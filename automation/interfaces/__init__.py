@@ -10,6 +10,10 @@ from automation.interfaces.slack_history_interface import ISlackHistoryService
 from automation.interfaces.git_pr_interface import IGitPRService
 from automation.interfaces.execution_output_classifier_interface import IExecutionOutputClassifierService
 from automation.interfaces.telemetry_interface import ITelemetryService
+from automation.interfaces.qa_contract_interface import IQAContractValidatorService
+from automation.interfaces.secret_drift_interface import ISecretDriftDetectorService
+from automation.interfaces.sops_interface import ISOpsService
+from automation.interfaces.health_check_interface import IHealthCheckService
 
 __all__ = [
     "ICodeDevelopmentService",
@@ -23,4 +27,8 @@ __all__ = [
     "IGitPRService",
     "IExecutionOutputClassifierService",
     "ITelemetryService",
+    "IQAContractValidatorService",
+    "ISecretDriftDetectorService",
+    "ISOpsService",
+    "IHealthCheckService",
 ]
