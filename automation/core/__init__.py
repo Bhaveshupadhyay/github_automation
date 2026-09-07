@@ -17,6 +17,7 @@ from automation.core.dependency import (
     get_secret_drift_detector_service,
     get_qa_contract_validator_service,
     get_health_check_service,
+    get_branch_resolver_service,
 )
 
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "get_secret_drift_detector_service",
     "get_qa_contract_validator_service",
     "get_health_check_service",
+    "get_branch_resolver_service",
 ]

@@ -14,6 +14,7 @@ from automation.interfaces.qa_contract_interface import IQAContractValidatorServ
 from automation.interfaces.secret_drift_interface import ISecretDriftDetectorService
 from automation.interfaces.sops_interface import ISOpsService
 from automation.interfaces.health_check_interface import IHealthCheckService
+from automation.interfaces.branch_resolver_interface import IBranchResolver
 
 __all__ = [
     "ICodeDevelopmentService",
@@ -31,4 +32,5 @@ __all__ = [
     "ISecretDriftDetectorService",
     "ISOpsService",
     "IHealthCheckService",
+    "IBranchResolver",
 ]
