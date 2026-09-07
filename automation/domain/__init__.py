@@ -19,6 +19,16 @@ from automation.domain.branch_resolver import (
     BranchResolutionResult,
     AIExtractedBranch,
 )
+from automation.domain.database_strategy import (
+    DatabaseStrategyType,
+    MigrationResult,
+    DatabaseConfig,
+)
+from automation.domain.lifecycle import (
+    ServiceStatus,
+    ServiceProcessInfo,
+    LifecycleResult,
+)
 
 __all__ = [
     "DEFAULT_GEMINI_MODEL",
@@ -43,4 +53,10 @@ __all__ = [
     "ResolutionSource",
     "BranchResolutionResult",
     "AIExtractedBranch",
+    "DatabaseStrategyType",
+    "MigrationResult",
+    "DatabaseConfig",
+    "ServiceStatus",
+    "ServiceProcessInfo",
+    "LifecycleResult",
 ]

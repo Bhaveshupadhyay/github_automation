@@ -15,6 +15,9 @@ from automation.interfaces.secret_drift_interface import ISecretDriftDetectorSer
 from automation.interfaces.sops_interface import ISOpsService
 from automation.interfaces.health_check_interface import IHealthCheckService
 from automation.interfaces.branch_resolver_interface import IBranchResolver
+from automation.interfaces.database_strategy_interface import IDatabaseStrategy
+from automation.interfaces.lifecycle_interface import ILifecycleSupervisor
+from automation.interfaces.process_tree_interface import IProcessTreeManager
 
 __all__ = [
     "ICodeDevelopmentService",
@@ -33,4 +36,8 @@ __all__ = [
     "ISOpsService",
     "IHealthCheckService",
     "IBranchResolver",
+    "IDatabaseStrategy",
+    "ILifecycleSupervisor",
+    "IProcessTreeManager",
 ]
+

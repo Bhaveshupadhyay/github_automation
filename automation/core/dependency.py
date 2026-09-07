@@ -20,6 +20,16 @@ from automation.interfaces import (
     ISOpsService,
     IHealthCheckService,
     IBranchResolver,
+    IDatabaseStrategy,
+    ILifecycleSupervisor,
+    IProcessTreeManager,
+)
+
+from automation.domain import (
+    WorkflowEnvironment,
+    GitPRDetails,
+    DatabaseConfig,
+    DatabaseStrategyType,
 )
 
 from automation.services.passthrough_intent_router_service import PassThroughIntentRouterService
@@ -39,6 +49,13 @@ from automation.services.secret_drift_service import SecretDriftDetectorService
 from automation.services.sops_service import SOpsService
 from automation.services.health_check_service import HealthCheckService
 from automation.services.branch_resolver_service import BranchResolverService
+from automation.services.database_strategies import (
+    DevCloudDatabaseStrategy,
+    EphemeralRunnerDatabaseStrategy,
+    create_database_strategy,
+)
+from automation.services.process_tree_manager import ProcessTreeManager
+from automation.services.lifecycle_supervisor_service import LifecycleSupervisorService
 
 
 @lru_cache(maxsize=1)
@@ -155,5 +172,33 @@ def get_branch_resolver_service(
         gemini_model=gemini_model,
         genai_client=genai_client,
     )
+
+
+def get_process_tree_manager() -> IProcessTreeManager:
+    """Returns IProcessTreeManager implementation."""
+    return ProcessTreeManager()
+
+
+def get_database_strategy(config: Optional[DatabaseConfig] = None) -> IDatabaseStrategy:
+    """Returns IDatabaseStrategy implementation from configuration."""
+    if config:
+        return create_database_strategy(config)
+    return DevCloudDatabaseStrategy()
+
+
+def get_lifecycle_supervisor(
+    sops_service: Optional[ISOpsService] = None,
+    qa_contract_validator: Optional[IQAContractValidatorService] = None,
+    health_check_service: Optional[IHealthCheckService] = None,
+    process_tree_manager: Optional[IProcessTreeManager] = None,
+) -> ILifecycleSupervisor:
+    """Returns ILifecycleSupervisor implementation with injected services."""
+    return LifecycleSupervisorService(
+        sops_service=sops_service or get_sops_service(),
+        qa_contract_validator=qa_contract_validator or get_qa_contract_validator_service(),
+        health_check_service=health_check_service or get_health_check_service(),
+        process_tree_manager=process_tree_manager or get_process_tree_manager(),
+    )
+
 
 
