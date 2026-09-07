@@ -14,6 +14,7 @@ from automation.domain.qa_contract import (
 )
 from automation.domain.secret_drift import DriftReport
 from automation.domain.health_check import HealthCheckResult
+from automation.domain.branch_resolver import ResolutionSource, BranchResolutionResult
 
 __all__ = [
     "DEFAULT_GEMINI_MODEL",
@@ -35,4 +36,6 @@ __all__ = [
     "LifecycleHooks",
     "DriftReport",
     "HealthCheckResult",
+    "ResolutionSource",
+    "BranchResolutionResult",
 ]

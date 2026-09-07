@@ -19,6 +19,7 @@ from automation.interfaces import (
     ISecretDriftDetectorService,
     ISOpsService,
     IHealthCheckService,
+    IBranchResolver,
 )
 
 from automation.services.passthrough_intent_router_service import PassThroughIntentRouterService
@@ -37,6 +38,7 @@ from automation.services.qa_contract_service import QAContractValidatorService
 from automation.services.secret_drift_service import SecretDriftDetectorService
 from automation.services.sops_service import SOpsService
 from automation.services.health_check_service import HealthCheckService
+from automation.services.branch_resolver_service import BranchResolverService
 
 
 @lru_cache(maxsize=1)
@@ -138,5 +140,10 @@ def get_qa_contract_validator_service(schema_path: Optional[str] = None) -> IQAC
 def get_health_check_service(default_timeout: float = 30.0, default_interval: float = 1.0) -> IHealthCheckService:
     """Returns IHealthCheckService implementation."""
     return HealthCheckService(default_timeout=default_timeout, default_interval=default_interval)
+
+
+def get_branch_resolver_service(command_timeout_seconds: float = 5.0) -> IBranchResolver:
+    """Returns IBranchResolver implementation."""
+    return BranchResolverService(command_timeout_seconds=command_timeout_seconds)
 
 
