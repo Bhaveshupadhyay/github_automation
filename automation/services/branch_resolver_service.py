@@ -1,7 +1,6 @@
 """Service for cross-repository dependency and branch resolution."""
 import json
 import logging
-import os
 import re
 import subprocess
 import urllib.request
@@ -14,7 +13,7 @@ except ImportError:
     genai = None
     types = None
 
-from automation.core import get_gemini_api_key, normalize_gemini_model
+
 from automation.domain.branch_resolver import (
     AIExtractedBranch,
     BranchResolutionResult,
@@ -78,6 +77,8 @@ class BranchResolverService(IBranchResolver):
         gemini_model: Optional[str] = None,
         genai_client: Optional[Any] = None,
     ) -> None:
+        from automation.core.credentials import get_gemini_api_key, normalize_gemini_model
+
         self._command_timeout = command_timeout_seconds
         self._api_key = api_key if api_key is not None else get_gemini_api_key()
         self._model_name = normalize_gemini_model(gemini_model)
@@ -112,22 +113,23 @@ class BranchResolverService(IBranchResolver):
 
         return trimmed
 
-    def check_remote_branch_exists(self, backend_repo_url: str, branch_name: str) -> bool:
-        """Probes the remote backend repository using 'git ls-remote'."""
+    def check_remote_ref_exists(self, backend_repo_url: str, ref_or_branch: str) -> bool:
+        """Probes the remote backend repository for a branch or pull request ref using 'git ls-remote'."""
         try:
             sanitized_url = self.sanitize_repo_url(backend_repo_url)
-            sanitized_branch = self.sanitize_branch_name(branch_name)
+            if ref_or_branch.startswith("refs/pull/") and ref_or_branch.endswith("/head"):
+                target_ref = ref_or_branch
+            else:
+                sanitized_branch = self.sanitize_branch_name(ref_or_branch)
+                target_ref = f"refs/heads/{sanitized_branch}"
         except ValueError as e:
-            logger.warning(f"Sanitization rejected remote branch check: {e}")
+            logger.warning(f"Sanitization rejected remote ref check: {e}")
             return False
 
-        cmd = [
-            "git",
-            "ls-remote",
-            "--heads",
-            sanitized_url,
-            f"refs/heads/{sanitized_branch}",
-        ]
+        # Security audit notice:
+        # Subprocess invocation is guarded: shell=False, arguments passed as a fixed list
+        # of static strings and strictly sanitized inputs, preventing command and option injection.
+        cmd = ["git", "ls-remote", sanitized_url, target_ref]
 
         try:
             result = subprocess.run(
@@ -138,13 +140,17 @@ class BranchResolverService(IBranchResolver):
                 check=False,
             )
             if result.returncode == 0 and result.stdout:
-                return f"refs/heads/{sanitized_branch}" in result.stdout
+                return target_ref in result.stdout
             return False
         except (subprocess.SubprocessError, FileNotFoundError, OSError) as exc:
             logger.warning(
-                f"git ls-remote probe failed for '{sanitized_branch}' on '{sanitized_url}': {exc}"
+                f"git ls-remote probe failed for '{target_ref}' on '{sanitized_url}': {exc}"
             )
             return False
+
+    def check_remote_branch_exists(self, backend_repo_url: str, branch_name: str) -> bool:
+        """Probes the remote backend repository using 'git ls-remote'."""
+        return self.check_remote_ref_exists(backend_repo_url, branch_name)
 
     @staticmethod
     def _clean_json_markdown(text: str) -> str:
@@ -159,8 +165,8 @@ class BranchResolverService(IBranchResolver):
         """Detects if a candidate branch in PR body is negated, crossed-out, or ambiguous."""
         body_lower = pr_body.lower()
 
-        # Check for multiple branch declarations
-        matches = EXPLICIT_BRANCH_REGEX.findall(pr_body)
+        # Count both branch and PR declarations to detect competing declarations
+        matches = EXPLICIT_BRANCH_REGEX.findall(pr_body) + EXPLICIT_PR_REGEX.findall(pr_body)
         if len(matches) > 1:
             return True
 
@@ -204,6 +210,62 @@ class BranchResolverService(IBranchResolver):
 
         return None
 
+    def _process_ai_candidate(
+        self,
+        ai_extracted: Optional[AIExtractedBranch],
+        backend_repo_url: str,
+    ) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """Validates, grounds with Git, and processes an AI-extracted branch candidate."""
+        if not ai_extracted:
+            return None
+
+        # Filter out negated/deprecated branches or low confidence inferences
+        if ai_extracted.is_negated_or_deprecated:
+            logger.info(f"AI flagged branch as negated/deprecated: {ai_extracted.reasoning}")
+            return None
+
+        if ai_extracted.confidence < 0.5:
+            logger.info(f"AI confidence too low ({ai_extracted.confidence}): {ai_extracted.reasoning}")
+            return None
+
+        # Process PR number
+        if ai_extracted.target_pr_number:
+            pr_num = ai_extracted.target_pr_number
+            target_ref = f"refs/pull/{pr_num}/head"
+            # Ground with Git remote verification
+            if self.check_remote_ref_exists(backend_repo_url, target_ref):
+                return target_ref, {
+                    "ai_confidence": ai_extracted.confidence,
+                    "ai_reasoning": ai_extracted.reasoning,
+                    "pr_number": pr_num,
+                    "verified_on_remote": True,
+                }
+            else:
+                logger.warning(
+                    f"AI proposed PR ref '{target_ref}' does not exist on remote '{backend_repo_url}'."
+                )
+                return None
+
+        # Process branch name
+        if ai_extracted.target_branch:
+            try:
+                sanitized = self.sanitize_branch_name(ai_extracted.target_branch)
+                # Ground with Git remote verification
+                if self.check_remote_branch_exists(backend_repo_url, sanitized):
+                    return sanitized, {
+                        "ai_confidence": ai_extracted.confidence,
+                        "ai_reasoning": ai_extracted.reasoning,
+                        "verified_on_remote": True,
+                    }
+                else:
+                    logger.warning(
+                        f"AI proposed branch '{sanitized}' does not exist on remote '{backend_repo_url}'."
+                    )
+            except ValueError as e:
+                logger.warning(f"AI proposed branch failed sanitization: {e}")
+
+        return None
+
     def extract_branch_with_ai(
         self,
         pr_body: str,
@@ -236,25 +298,43 @@ class BranchResolverService(IBranchResolver):
 
         ai_extracted: Optional[AIExtractedBranch] = None
 
-        # 1. Try via google.genai Client (or injected mock client)
+        # 1. Try via injected client (for testing or specific configurations)
         if self._genai_client is not None:
             try:
+                config_obj = (
+                    types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        response_schema=AIExtractedBranch,
+                    )
+                    if types is not None
+                    else {
+                        "system_instruction": system_instruction,
+                        "response_mime_type": "application/json",
+                        "response_schema": AIExtractedBranch,
+                    }
+                )
                 response = self._genai_client.models.generate_content(
                     model=self._model_name,
                     contents=prompt_content,
-                    config={"response_mime_type": "application/json"},
+                    config=config_obj,
                 )
                 raw_text = response.text if hasattr(response, "text") else str(response)
                 ai_extracted = AIExtractedBranch.model_validate_json(self._clean_json_markdown(raw_text))
             except Exception as e:
                 logger.warning(f"Injected genai_client call failed: {e}")
-        elif genai is not None:
+            # Keep injected client exclusive to avoid unexpected live external network calls
+            return self._process_ai_candidate(ai_extracted, backend_repo_url)
+
+        # 2. Try via official google.genai Client
+        if genai is not None:
             try:
+                # HttpOptions timeout is in milliseconds (10_000 ms = 10s)
                 client = genai.Client(
                     api_key=self._api_key,
                     http_options=types.HttpOptions(
                         headers={"X-goog-api-key": self._api_key},
-                        timeout=10.0,
+                        timeout=10_000,
                     ),
                 )
                 response = client.models.generate_content(
@@ -275,7 +355,7 @@ class BranchResolverService(IBranchResolver):
             except Exception as e:
                 logger.warning(f"google-genai SDK call failed: {e}. Trying REST fallback...")
 
-        # 2. REST API Fallback
+        # 3. REST API Fallback
         if ai_extracted is None:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent"
@@ -305,47 +385,7 @@ class BranchResolverService(IBranchResolver):
             except Exception as e:
                 logger.warning(f"REST Gemini API fallback failed: {e}")
 
-        if not ai_extracted:
-            return None
-
-        # Filter out negated/deprecated branches or low confidence inferences
-        if ai_extracted.is_negated_or_deprecated:
-            logger.info(f"AI flagged branch as negated/deprecated: {ai_extracted.reasoning}")
-            return None
-
-        if ai_extracted.confidence < 0.5:
-            logger.info(f"AI confidence too low ({ai_extracted.confidence}): {ai_extracted.reasoning}")
-            return None
-
-        # Process PR number
-        if ai_extracted.target_pr_number:
-            pr_num = ai_extracted.target_pr_number
-            target_ref = f"refs/pull/{pr_num}/head"
-            return target_ref, {
-                "ai_confidence": ai_extracted.confidence,
-                "ai_reasoning": ai_extracted.reasoning,
-                "pr_number": pr_num,
-            }
-
-        # Process branch name
-        if ai_extracted.target_branch:
-            try:
-                sanitized = self.sanitize_branch_name(ai_extracted.target_branch)
-                # Ground with Git remote verification
-                if self.check_remote_branch_exists(backend_repo_url, sanitized):
-                    return sanitized, {
-                        "ai_confidence": ai_extracted.confidence,
-                        "ai_reasoning": ai_extracted.reasoning,
-                        "verified_on_remote": True,
-                    }
-                else:
-                    logger.warning(
-                        f"AI proposed branch '{sanitized}' does not exist on remote '{backend_repo_url}'."
-                    )
-            except ValueError as e:
-                logger.warning(f"AI proposed branch failed sanitization: {e}")
-
-        return None
+        return self._process_ai_candidate(ai_extracted, backend_repo_url)
 
     def resolve_branch(
         self,
@@ -361,18 +401,20 @@ class BranchResolverService(IBranchResolver):
         1. Fast Regex Match: If unambiguous & remote head exists -> Fast resolution (< 50ms).
         2. AI Intent Disambiguation: If regex match is negated/ambiguous or absent with conversational cues.
         3. Remote Branch Name Match: If identical branch exists on backend.
-        4. Default Fallback: Fallback to 'dev' / 'main' with route-drift clarification.
+        4. Default Fallback: Fallback to verified default branch with route-drift clarification.
         """
         sanitized_url = self.sanitize_repo_url(backend_repo_url)
         sanitized_source = self.sanitize_branch_name(source_branch)
+        explicit_failed_clarification: Optional[str] = None
 
         # Step 1: Regex Fast-Path Extraction
         explicit_linkage = self._extract_explicit_linkage(pr_body)
         if explicit_linkage:
             candidate_ref, details = explicit_linkage
             is_ambiguous = self._is_ambiguous_or_negated(pr_body or "", candidate_ref)
+            exists_on_remote = self.check_remote_ref_exists(sanitized_url, candidate_ref)
 
-            if not is_ambiguous:
+            if not is_ambiguous and exists_on_remote:
                 logger.info(f"Resolved branch via Fast-Path Regex (Explicit PR Body): '{candidate_ref}'")
                 return BranchResolutionResult(
                     target_branch=candidate_ref,
@@ -384,7 +426,7 @@ class BranchResolverService(IBranchResolver):
                 )
 
             logger.info(
-                f"Candidate '{candidate_ref}' is ambiguous or negated in PR body. Consulting AI..."
+                f"Candidate '{candidate_ref}' is ambiguous ({is_ambiguous}) or absent remotely ({not exists_on_remote}). Consulting AI..."
             )
             # Try AI disambiguation
             ai_result = self.extract_branch_with_ai(pr_body or "", sanitized_url)
@@ -398,6 +440,18 @@ class BranchResolverService(IBranchResolver):
                     resolution_source=ResolutionSource.AI_SEMANTIC_EXTRACTION,
                     clarification_needed=False,
                     details=ai_details,
+                )
+
+            # If explicit linkage was declared but does not exist on remote (and AI didn't find another)
+            if not exists_on_remote:
+                logger.warning(
+                    f"Explicit backend target '{candidate_ref}' does not exist on remote '{sanitized_url}'. Falling back..."
+                )
+                explicit_failed_clarification = (
+                    f"⚠️ **Declared Backend Target Not Found**:\n"
+                    f"The pull request specified backend target `{candidate_ref}`, but this ref does not exist on "
+                    f"`{sanitized_url}`.\n"
+                    f"Please push your backend branch or update the pull request description."
                 )
 
         # Step 2: Conversational Natural Language AI Extraction (when no regex matched)
@@ -423,25 +477,46 @@ class BranchResolverService(IBranchResolver):
                 target_repo_url=sanitized_url,
                 source_branch=sanitized_source,
                 resolution_source=ResolutionSource.REMOTE_BRANCH_MATCH,
-                clarification_needed=False,
-                details={"matched_remote_head": f"refs/heads/{sanitized_source}"},
+                clarification_needed=bool(explicit_failed_clarification),
+                clarification_message=explicit_failed_clarification,
+                details={
+                    "matched_remote_head": f"refs/heads/{sanitized_source}",
+                    "explicit_target_failed": bool(explicit_failed_clarification),
+                },
             )
 
-        # Step 4: Default Fallback
-        fallback_target = default_branch
-        try:
-            sanitized_default = self.sanitize_branch_name(default_branch)
-            if self.check_remote_branch_exists(sanitized_url, sanitized_default):
-                fallback_target = sanitized_default
-            elif sanitized_default != "main" and self.check_remote_branch_exists(sanitized_url, "main"):
-                fallback_target = "main"
-        except ValueError:
-            fallback_target = "dev"
+        # Step 4: Default Fallback - probe available candidates in preference order
+        fallback_candidates = [default_branch, "dev", "main", "master"]
+        # Deduplicate while preserving order
+        candidates = list(dict.fromkeys(fallback_candidates))
+        verified_fallback: Optional[str] = None
+
+        for cand in candidates:
+            try:
+                sanitized_cand = self.sanitize_branch_name(cand)
+                if self.check_remote_branch_exists(sanitized_url, sanitized_cand):
+                    verified_fallback = sanitized_cand
+                    break
+            except ValueError:
+                continue
+
+        if verified_fallback:
+            fallback_target = verified_fallback
+            fallback_verified = True
+        else:
+            fallback_target = default_branch
+            fallback_verified = False
 
         clarification_needed = False
         clarification_message = None
 
-        if new_backend_routes_detected:
+        if explicit_failed_clarification:
+            clarification_needed = True
+            clarification_message = (
+                f"{explicit_failed_clarification}\n\n"
+                f"The automated QA pipeline defaulted to testing against backend branch `{fallback_target}`."
+            )
+        elif new_backend_routes_detected:
             clarification_needed = True
             clarification_message = (
                 f"⚠️ **Cross-Repository Dependency Notice**:\n"
@@ -457,6 +532,14 @@ class BranchResolverService(IBranchResolver):
                 f"Backend PR: #<pr_number>\n"
                 f"```"
             )
+        elif not fallback_verified:
+            clarification_needed = True
+            clarification_message = (
+                f"⚠️ **No Usable Default Branch Found**:\n"
+                f"Neither default branch `{default_branch}` nor standard branches (`dev`, `main`, `master`) "
+                f"could be verified on `{sanitized_url}`.\n"
+                f"Please specify a valid backend branch in the pull request description."
+            )
 
         logger.info(f"Resolved branch via Default Fallback: '{fallback_target}'")
         return BranchResolutionResult(
@@ -466,5 +549,10 @@ class BranchResolverService(IBranchResolver):
             resolution_source=ResolutionSource.DEFAULT_FALLBACK,
             clarification_needed=clarification_needed,
             clarification_message=clarification_message,
-            details={"fallback_branch": fallback_target, "routes_flagged": new_backend_routes_detected},
+            details={
+                "fallback_branch": fallback_target,
+                "fallback_verified": fallback_verified,
+                "routes_flagged": new_backend_routes_detected,
+                "explicit_target_failed": bool(explicit_failed_clarification),
+            },
         )

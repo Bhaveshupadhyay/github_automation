@@ -55,17 +55,17 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    pr_body: Optional[str] = args.pr_body
-    if args.pr_body_file:
-        body_file = Path(args.pr_body_file)
-        if body_file.exists():
-            pr_body = body_file.read_text(encoding="utf-8")
-        else:
-            print(f"⚠️ Warning: PR body file not found: {body_file}", file=sys.stderr)
-
     resolver = get_branch_resolver_service()
 
     try:
+        pr_body: Optional[str] = args.pr_body
+        if args.pr_body_file:
+            body_file = Path(args.pr_body_file)
+            if body_file.exists():
+                pr_body = body_file.read_text(encoding="utf-8")
+            else:
+                print(f"⚠️ Warning: PR body file not found: {body_file}", file=sys.stderr)
+
         result = resolver.resolve_branch(
             pr_body=pr_body,
             source_branch=args.source_branch,
@@ -87,14 +87,18 @@ def main() -> None:
 
         if args.output_env:
             github_env_path = os.environ.get("GITHUB_ENV")
+            status_file = sys.stderr if args.json else sys.stdout
             if github_env_path:
                 with open(github_env_path, "a", encoding="utf-8") as f:
                     f.write(f"RESOLVED_BACKEND_BRANCH={result.target_branch}\n")
                     f.write(f"CLARIFICATION_NEEDED={'true' if result.clarification_needed else 'false'}\n")
                     f.write(f"RESOLUTION_SOURCE={result.resolution_source.value}\n")
-                print(f"ℹ️ Exported RESOLVED_BACKEND_BRANCH={result.target_branch} to $GITHUB_ENV")
+                print(
+                    f"ℹ️ Exported RESOLVED_BACKEND_BRANCH={result.target_branch} to $GITHUB_ENV",
+                    file=status_file,
+                )
             else:
-                print(f"RESOLVED_BACKEND_BRANCH={result.target_branch}")
+                print(f"RESOLVED_BACKEND_BRANCH={result.target_branch}", file=status_file)
 
         sys.exit(0)
 

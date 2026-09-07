@@ -16,7 +16,7 @@ class AIExtractedBranch(BaseModel):
     """Structured branch dependency extracted via Gemini semantic analysis."""
     target_branch: Optional[str] = Field(None, description="Extracted backend branch name")
     target_pr_number: Optional[int] = Field(None, description="Extracted backend PR number")
-    confidence: float = Field(default=0.0, description="Confidence score from 0.0 to 1.0")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Confidence score from 0.0 to 1.0")
     reasoning: str = Field(default="", description="Explanation of how the target branch was determined")
     is_negated_or_deprecated: bool = Field(default=False, description="Whether the branch is explicitly rejected or obsolete")
 
