@@ -45,7 +45,7 @@ class TestQAContractValidator(unittest.TestCase):
             "healthCheckUrl": "/",
             "lifecycle": {"start": "npm start"},
         }
-        with self.assertRaises(ValidationError) as ctx:
+        with self.assertRaises((ValidationError, ValueError)) as ctx:
             self.validator.validate_contract_dict(invalid_data)
         self.assertIn("apiBaseUrlEnvVar", str(ctx.exception))
 
@@ -57,7 +57,7 @@ class TestQAContractValidator(unittest.TestCase):
             "healthCheckUrl": "/status",
             "lifecycle": {"start": "flutter run"},
         }
-        with self.assertRaises(ValidationError) as ctx:
+        with self.assertRaises((ValidationError, ValueError)) as ctx:
             self.validator.validate_contract_dict(invalid_data)
         self.assertIn("mobileConfig", str(ctx.exception))
 
@@ -69,7 +69,7 @@ class TestQAContractValidator(unittest.TestCase):
             "healthCheckUrl": "/health",
             "lifecycle": {"start": "uvicorn main:app"},
         }
-        with self.assertRaises(ValidationError) as ctx:
+        with self.assertRaises((ValidationError, ValueError)) as ctx:
             self.validator.validate_contract_dict(invalid_data)
         self.assertIn("port", str(ctx.exception).lower())
 
@@ -81,9 +81,46 @@ class TestQAContractValidator(unittest.TestCase):
             "healthCheckUrl": "/health",
             "lifecycle": {"prepare": "uv sync"},
         }
-        with self.assertRaises(ValidationError) as ctx:
+        with self.assertRaises((ValidationError, ValueError)) as ctx:
             self.validator.validate_contract_dict(invalid_data)
         self.assertIn("start", str(ctx.exception).lower())
+
+    def test_empty_or_whitespace_start_command_fails(self) -> None:
+        """Empty or whitespace-only start command must fail validation."""
+        for empty_cmd in ["", "   ", "\t\n"]:
+            invalid_data = {
+                "serviceType": "backend",
+                "port": 8000,
+                "healthCheckUrl": "/health",
+                "lifecycle": {"start": empty_cmd},
+            }
+            with self.assertRaises((ValidationError, ValueError)):
+                self.validator.validate_contract_dict(invalid_data)
+
+    def test_conflicting_start_commands_fails(self) -> None:
+        """Conflicting start commands declared at top-level and in lifecycle must fail validation."""
+        conflicting_data = {
+            "serviceType": "backend",
+            "port": 8000,
+            "healthCheckUrl": "/health",
+            "start": "python start_a.py",
+            "lifecycle": {"start": "python start_b.py"},
+        }
+        with self.assertRaises((ValidationError, ValueError)) as ctx:
+            self.validator.validate_contract_dict(conflicting_data)
+        self.assertIn("conflicting start commands", str(ctx.exception).lower())
+
+    def test_unknown_properties_fail_validation(self) -> None:
+        """Unknown extra properties must be rejected by schema and domain model."""
+        invalid_data = {
+            "serviceType": "backend",
+            "port": 8000,
+            "healthCheckUrl": "/health",
+            "lifecycle": {"start": "python main.py"},
+            "unknownSpellingProperty": 123,
+        }
+        with self.assertRaises((ValidationError, ValueError)):
+            self.validator.validate_contract_dict(invalid_data)
 
     def test_nonexistent_contract_file(self) -> None:
         """Attempting to validate missing file raises FileNotFoundError."""

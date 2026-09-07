@@ -1,7 +1,7 @@
 """Domain models for QA Automation Contract (qa-contract.json)."""
 from enum import Enum
 from typing import Optional, Any
-from pydantic import BaseModel, Field, model_validator, ConfigDict
+from pydantic import BaseModel, Field, model_validator, field_validator, ConfigDict
 
 
 class ServiceType(str, Enum):
@@ -34,10 +34,25 @@ class LifecycleHooks(BaseModel):
     prepare: Optional[str] = Field(None, description="Command to prepare dependencies / migrations")
     start: str = Field(..., description="Command to launch the service")
 
+    @field_validator("start")
+    @classmethod
+    def validate_start_non_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Lifecycle command hook 'start' cannot be empty or whitespace.")
+        return v.strip()
+
+    @field_validator("prepare")
+    @classmethod
+    def validate_prepare_non_empty(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v_stripped = v.strip()
+            return v_stripped if v_stripped else None
+        return None
+
 
 class QAContract(BaseModel):
     """Declarative operational contract defining service lifecycle, readiness probe, and environment links."""
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     schema_uri: Optional[str] = Field(None, alias="$schema")
     service_type: ServiceType = Field(..., alias="serviceType")
@@ -51,16 +66,43 @@ class QAContract(BaseModel):
 
     @model_validator(mode="after")
     def validate_contract_integrity(self) -> "QAContract":
-        # 1. Resolve lifecycle command hooks
+        # 1. Resolve and validate lifecycle command hooks
         if not self.lifecycle:
-            if not self.start:
-                raise ValueError("Lifecycle command hook 'start' must be provided either under 'lifecycle.start' or 'start'.")
-            self.lifecycle = LifecycleHooks(prepare=self.prepare, start=self.start)
+            if not self.start or not self.start.strip():
+                raise ValueError("Lifecycle command hook 'start' must be provided and cannot be empty or whitespace.")
+            self.start = self.start.strip()
+            prep = self.prepare.strip() if self.prepare and self.prepare.strip() else None
+            self.prepare = prep
+            self.lifecycle = LifecycleHooks(prepare=prep, start=self.start)
         else:
-            # Sync top-level if missing
-            if not self.start:
+            if not self.lifecycle.start or not self.lifecycle.start.strip():
+                raise ValueError("Lifecycle command hook 'lifecycle.start' cannot be empty or whitespace.")
+            self.lifecycle.start = self.lifecycle.start.strip()
+            if self.lifecycle.prepare:
+                self.lifecycle.prepare = self.lifecycle.prepare.strip() or None
+
+            # Check for conflicting top-level start
+            if self.start is not None:
+                self.start = self.start.strip()
+                if not self.start:
+                    raise ValueError("Top-level 'start' cannot be empty or whitespace.")
+                if self.start != self.lifecycle.start:
+                    raise ValueError(
+                        f"Conflicting start commands declared: top-level 'start' ('{self.start}') "
+                        f"does not match 'lifecycle.start' ('{self.lifecycle.start}')."
+                    )
+            else:
                 self.start = self.lifecycle.start
-            if not self.prepare and self.lifecycle.prepare:
+
+            # Check for conflicting top-level prepare
+            if self.prepare is not None:
+                self.prepare = self.prepare.strip() or None
+                if self.prepare != self.lifecycle.prepare:
+                    raise ValueError(
+                        f"Conflicting prepare commands declared: top-level 'prepare' ('{self.prepare}') "
+                        f"does not match 'lifecycle.prepare' ('{self.lifecycle.prepare}')."
+                    )
+            else:
                 self.prepare = self.lifecycle.prepare
 
         # 2. Frontend contract rules

@@ -28,10 +28,22 @@ class QAContractValidatorService(IQAContractValidatorService):
         return self.validate_contract_dict(data)
 
     def validate_contract_dict(self, data: Dict[str, Any]) -> QAContract:
-        """Validates contract data dictionary against Pydantic schema and structural rules."""
+        """Validates contract data dictionary against JSON Schema and Pydantic domain rules."""
         if not isinstance(data, dict):
             raise ValueError(f"QA Contract root must be a JSON object/dict, got {type(data).__name__}")
 
-        # Pydantic QAContract enforces port range, lifecycle, serviceType-specific requirements
+        # 1. Validate against declarative JSON Schema specification if schema file exists
+        if self.schema_path.is_file():
+            try:
+                import jsonschema
+                with open(self.schema_path, "r", encoding="utf-8") as sf:
+                    schema_def = json.load(sf)
+                jsonschema.validate(instance=data, schema=schema_def)
+            except ImportError:
+                pass
+            except Exception as err:
+                raise ValueError(f"Contract failed JSON Schema validation against {self.schema_path}: {err}") from err
+
+        # 2. Pydantic QAContract enforces type safety, port range, lifecycle, serviceType rules
         contract = QAContract.model_validate(data)
         return contract

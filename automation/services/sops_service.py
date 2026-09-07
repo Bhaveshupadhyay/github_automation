@@ -12,7 +12,13 @@ from automation.interfaces.sops_interface import ISOpsService
 class SOpsService(ISOpsService):
     """Encapsulates Mozilla SOPS CLI interactions and plaintext key auditing."""
 
-    ENV_KEY_PATTERN = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+    ENV_LINE_PATTERN = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
+    SOPS_METADATA_EXCLUDES = {
+        "sops_version",
+        "sops_mac",
+        "sops_lastmodified",
+        "sops_unencrypted_suffix",
+    }
 
     def __init__(self, sops_binary: Optional[str] = None) -> None:
         self._sops_binary = sops_binary or shutil.which("sops") or "sops"
@@ -21,10 +27,21 @@ class SOpsService(ISOpsService):
         """Returns True if the sops binary is discoverable and executable."""
         return shutil.which(self._sops_binary) is not None
 
+    def _is_sops_internal_key(self, key: str) -> bool:
+        """Returns True if key is internal SOPS metadata rather than an application variable."""
+        if key in self.SOPS_METADATA_EXCLUDES:
+            return True
+        if key.startswith("sops_") and any(
+            key.startswith(prefix) for prefix in ("sops_age__", "sops_kms__", "sops_gcp_kms__", "sops_azure_kv__")
+        ):
+            return True
+        return False
+
     def parse_encrypted_keys(self, encrypted_path: Union[str, Path]) -> Set[str]:
         """Extracts visible environment variable keys from .env.qa.enc without decryption.
 
         SOPS dotenv encryption keeps variable keys unencrypted and values encrypted.
+        Verifies that SOPS metadata is present and all application values are encrypted.
         Internal SOPS metadata keys prefixed with 'sops_' are excluded.
         """
         path = Path(encrypted_path)
@@ -32,18 +49,33 @@ class SOpsService(ISOpsService):
             raise FileNotFoundError(f"Encrypted secrets file not found: {path.resolve()}")
 
         keys: Set[str] = set()
+        has_sops_metadata = False
+
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
 
-                match = self.ENV_KEY_PATTERN.match(line)
+                match = self.ENV_LINE_PATTERN.match(line)
                 if match:
                     key = match.group(1)
-                    # Exclude SOPS internal metadata keys
-                    if not key.lower().startswith("sops_"):
-                        keys.add(key)
+                    val = match.group(2).strip().strip("'\"")
+
+                    if self._is_sops_internal_key(key):
+                        has_sops_metadata = True
+                        continue
+
+                    if not val.startswith("ENC["):
+                        raise ValueError(
+                            f"File '{path}' is not a valid SOPS-encrypted file: "
+                            f"key '{key}' has unencrypted value."
+                        )
+
+                    keys.add(key)
+
+        if not has_sops_metadata:
+            raise ValueError(f"File '{path}' does not contain valid SOPS encryption metadata.")
 
         return keys
 
@@ -81,6 +113,7 @@ class SOpsService(ISOpsService):
         """Decrypts a SOPS-encrypted dotenv file.
 
         Accepts age_private_key directly or reads SOPS_AGE_KEY from process environment.
+        Writes output with owner-only permissions (0600) when output_path is provided.
         """
         enc_p = Path(encrypted_path)
         if not enc_p.is_file():
@@ -104,6 +137,13 @@ class SOpsService(ISOpsService):
         if output_path:
             out_p = Path(output_path)
             out_p.parent.mkdir(parents=True, exist_ok=True)
-            out_p.write_text(decrypted_text, encoding="utf-8")
+            # Ensure owner-only permissions (0600) before writing secrets to disk
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            fd = os.open(str(out_p), flags, 0o600)
+            try:
+                os.write(fd, decrypted_text.encode("utf-8"))
+            finally:
+                os.close(fd)
+            os.chmod(str(out_p), 0o600)
 
         return decrypted_text

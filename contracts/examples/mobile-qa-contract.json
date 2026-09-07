@@ -2,7 +2,7 @@
   "$schema": "../../qa-contract.schema.json",
   "serviceType": "mobile",
   "port": 8081,
-  "healthCheckUrl": "/status",
+  "healthCheckUrl": "/",
   "mobileConfig": {
     "platform": "android",
     "bundleId": "com.company.app",
@@ -10,6 +10,6 @@
   },
   "lifecycle": {
     "prepare": "flutter pub get && flutter build apk --debug",
-    "start": "flutter run --target lib/main_qa.dart"
+    "start": "flutter run -d web-server --web-port 8081 --web-hostname 0.0.0.0 --target lib/main_qa.dart"
   }
 }

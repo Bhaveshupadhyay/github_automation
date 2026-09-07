@@ -76,6 +76,15 @@ class TestHealthCheckService(unittest.TestCase):
         self.assertIsNone(result.status_code)
         self.assertIn("timed out", result.message)
 
+    def test_probe_honors_short_timeout_without_overrun(self) -> None:
+        """Poll health must honor short timeout and not hang on unreachable socket."""
+        url = "http://127.0.0.1:59999/health"
+        start = time.monotonic()
+        result = self.health_service.poll_health(url, timeout_seconds=0.2, interval_seconds=0.05)
+        elapsed = time.monotonic() - start
+        self.assertFalse(result.healthy)
+        self.assertLess(elapsed, 0.45, f"Probe overran deadline: took {elapsed:.3f}s")
+
 
 if __name__ == "__main__":
     unittest.main()
