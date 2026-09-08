@@ -22,12 +22,19 @@ dependencies = [
     "jsonschema>=4.20.0",
 ]
 
+[project.optional-dependencies]
+qa = [
+    "playwright>=1.40.0",
+]
+
 [project.scripts]
 autopr = "automation.main:main"
 github-automation = "automation.main:main"
 github-automation-ai = "automation.main:main"
 qa-contract = "automation.qa_contract_cli:main"
 secret-drift = "automation.secret_drift_cli:main"
+qa-test-gen = "automation.qa_test_generator_cli:main"
+qa-media = "automation.qa_media_processor_cli:main"
 
 
 [build-system]
@@ -36,3 +43,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["automation"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

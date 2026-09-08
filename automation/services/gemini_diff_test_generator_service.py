@@ -1,0 +1,402 @@
+"""Service for Gemini-powered diff-aware test plan generation with commit-SHA caching."""
+import json
+import logging
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+    types = None
+
+from automation.domain.test_plan import (
+    ActionType,
+    AssertionType,
+    DiffAnalysisResult,
+    TestAction,
+    TestAssertion,
+    TestJourney,
+    TestPlan,
+)
+from automation.interfaces.diff_test_generator_interface import IDiffTestGeneratorService
+
+logger = logging.getLogger(__name__)
+
+# Maximum diff size to send to Gemini (prevents context overflow)
+MAX_DIFF_CHARS = 8000
+
+# Maximum journeys per test plan (prevents overly complex test plans)
+MAX_JOURNEYS = 5
+
+GEMINI_SYSTEM_PROMPT = """You are a QA test plan generator. You analyze git diffs to identify user-facing UI changes
+and produce structured test plans.
+
+Your task:
+1. Analyze the provided git diff to identify UI-facing changes (components, pages, routes, forms, buttons, labels, etc.).
+2. If there are NO UI-facing changes (e.g., only backend logic, config, documentation), respond with has_ui_changes=false.
+3. If there ARE UI-facing changes, generate test journeys that verify the user-visible impact.
+
+Rules for test journeys:
+- Each journey targets ONE specific user flow affected by the diff.
+- Use accessible selectors: role-based (button, link, textbox, heading) and visible text. NEVER use CSS selectors or test IDs.
+- Actions should be realistic user interactions: navigate, click, fill, scroll, select.
+- Assertions should verify VISIBLE outcomes: text appears, elements exist, alerts show, state updates.
+- Keep journeys focused and concise (3-8 actions each).
+- Maximum 5 journeys per plan.
+"""
+
+GEMINI_TEST_PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "has_ui_changes": {"type": "boolean"},
+        "summary": {"type": "string"},
+        "modified_components": {"type": "array", "items": {"type": "string"}},
+        "modified_routes": {"type": "array", "items": {"type": "string"}},
+        "journeys": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "entry_route": {"type": "string"},
+                    "actions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "action_type": {
+                                    "type": "string",
+                                    "enum": ["navigate", "click", "fill", "scroll", "select", "wait"],
+                                },
+                                "target": {"type": "string"},
+                                "value": {"type": "string"},
+                                "description": {"type": "string"},
+                            },
+                            "required": ["action_type", "target", "description"],
+                        },
+                    },
+                    "assertions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["visible_text", "element_exists", "alert_message", "state_update"],
+                                },
+                                "target": {"type": "string"},
+                                "description": {"type": "string"},
+                            },
+                            "required": ["type", "target", "description"],
+                        },
+                    },
+                },
+                "required": ["name", "entry_route", "actions", "assertions"],
+            },
+        },
+    },
+    "required": ["has_ui_changes", "summary"],
+}
+
+
+class GeminiDiffTestGeneratorService(IDiffTestGeneratorService):
+    """Generates test plans from git diffs using Gemini Flash for semantic analysis.
+
+    Features:
+    - Commit-SHA determinism caching to avoid redundant LLM calls on re-runs
+    - Automatic fallback to baseline smoke tests when no UI changes detected or on error
+    - Structured JSON output enforced via response_schema
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        gemini_model: Optional[str] = None,
+        genai_client: Optional[Any] = None,
+    ) -> None:
+        from automation.core.credentials import get_gemini_api_key, normalize_gemini_model
+
+        self._api_key = api_key if api_key is not None else get_gemini_api_key()
+        self._model_name = normalize_gemini_model(gemini_model)
+        self._genai_client = genai_client
+
+    def _get_client(self) -> Any:
+        """Returns the Gemini client, creating one lazily if needed."""
+        if self._genai_client is not None:
+            return self._genai_client
+
+        if genai is None:
+            raise RuntimeError(
+                "google-genai package is not installed. "
+                "Install it with: pip install google-genai"
+            )
+
+        if not self._api_key:
+            raise ValueError(
+                "Gemini API key is required for test plan generation. "
+                "Set AGY_API_KEY, GEMINI_API_KEY, or ANTIGRAVITY_API_KEY environment variable."
+            )
+
+        self._genai_client = genai.Client(api_key=self._api_key)
+        return self._genai_client
+
+    def _build_baseline_fallback(self, commit_sha: str, reason: str = "") -> TestPlan:
+        """Builds a minimal baseline smoke test plan as a fallback.
+
+        This ensures the pipeline always has at least one test to execute,
+        even when Gemini is unavailable or the diff has no UI changes.
+        """
+        logger.info(f"Using fallback baseline smoke test. Reason: {reason or 'No UI changes detected'}")
+        return TestPlan(
+            commit_sha=commit_sha,
+            generated_at=datetime.now(timezone.utc),
+            source="fallback_baseline",
+            raw_diff_summary=reason or "No UI-facing changes detected; running baseline smoke test.",
+            journeys=[
+                TestJourney(
+                    name="Baseline smoke test - verify application loads",
+                    entry_route="/",
+                    actions=[
+                        TestAction(
+                            action_type=ActionType.NAVIGATE,
+                            target="/",
+                            description="Navigate to the application root",
+                        ),
+                        TestAction(
+                            action_type=ActionType.WAIT,
+                            target="2000",
+                            description="Wait for application to fully render",
+                        ),
+                    ],
+                    assertions=[
+                        TestAssertion(
+                            type=AssertionType.ELEMENT_EXISTS,
+                            target="body",
+                            description="Verify the page body is rendered",
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+    def _truncate_diff(self, diff: str) -> str:
+        """Truncates large diffs to fit Gemini context limits.
+
+        Preserves file path headers and function signatures while trimming
+        large inline content blocks.
+        """
+        if len(diff) <= MAX_DIFF_CHARS:
+            return diff
+
+        logger.warning(
+            f"Diff exceeds {MAX_DIFF_CHARS} chars ({len(diff)} chars). "
+            f"Truncating to prevent Gemini context overflow."
+        )
+
+        lines = diff.splitlines()
+        truncated_lines: list[str] = []
+        current_chars = 0
+
+        for line in lines:
+            # Always include file path headers and function context markers
+            is_priority = (
+                line.startswith("diff --git")
+                or line.startswith("---")
+                or line.startswith("+++")
+                or line.startswith("@@")
+            )
+
+            line_len = len(line) + 1  # +1 for newline
+            if current_chars + line_len > MAX_DIFF_CHARS and not is_priority:
+                truncated_lines.append("... [diff truncated for context limit] ...")
+                break
+
+            truncated_lines.append(line)
+            current_chars += line_len
+
+        return "\n".join(truncated_lines)
+
+    def _parse_gemini_response(self, raw_json: dict, commit_sha: str) -> TestPlan:
+        """Parses Gemini's structured JSON response into a TestPlan."""
+        has_ui_changes = raw_json.get("has_ui_changes", False)
+        summary = raw_json.get("summary", "")
+
+        if not has_ui_changes:
+            return self._build_baseline_fallback(
+                commit_sha, reason=f"Gemini analysis: {summary}"
+            )
+
+        raw_journeys = raw_json.get("journeys", [])
+        if not raw_journeys:
+            return self._build_baseline_fallback(
+                commit_sha,
+                reason="Gemini detected UI changes but generated no test journeys.",
+            )
+
+        # Cap the number of journeys
+        journeys: list[TestJourney] = []
+        for raw_j in raw_journeys[:MAX_JOURNEYS]:
+            actions = []
+            for raw_a in raw_j.get("actions", []):
+                try:
+                    actions.append(
+                        TestAction(
+                            action_type=ActionType(raw_a["action_type"]),
+                            target=raw_a["target"],
+                            value=raw_a.get("value"),
+                            description=raw_a.get("description", ""),
+                        )
+                    )
+                except (KeyError, ValueError) as e:
+                    logger.warning(f"Skipping malformed action in Gemini response: {e}")
+                    continue
+
+            assertions = []
+            for raw_as in raw_j.get("assertions", []):
+                try:
+                    assertions.append(
+                        TestAssertion(
+                            type=AssertionType(raw_as["type"]),
+                            target=raw_as["target"],
+                            description=raw_as.get("description", ""),
+                        )
+                    )
+                except (KeyError, ValueError) as e:
+                    logger.warning(f"Skipping malformed assertion in Gemini response: {e}")
+                    continue
+
+            if actions or assertions:
+                journeys.append(
+                    TestJourney(
+                        name=raw_j.get("name", f"Journey {len(journeys) + 1}"),
+                        entry_route=raw_j.get("entry_route", "/"),
+                        actions=actions,
+                        assertions=assertions,
+                    )
+                )
+
+        if not journeys:
+            return self._build_baseline_fallback(
+                commit_sha,
+                reason="All Gemini-generated journeys had malformed actions/assertions.",
+            )
+
+        return TestPlan(
+            commit_sha=commit_sha,
+            generated_at=datetime.now(timezone.utc),
+            source="gemini",
+            raw_diff_summary=summary,
+            journeys=journeys,
+        )
+
+    def generate_test_plan(
+        self,
+        diff: str,
+        commit_sha: str,
+        component_context: str = "",
+    ) -> TestPlan:
+        """Analyze a git diff via Gemini and generate a structured test plan.
+
+        Falls back to baseline smoke tests if:
+        - The diff contains no UI-facing changes
+        - Gemini API call fails
+        - Gemini returns invalid/unparseable response
+        """
+        if not diff or not diff.strip():
+            return self._build_baseline_fallback(commit_sha, reason="Empty diff provided.")
+
+        truncated_diff = self._truncate_diff(diff)
+
+        user_prompt = f"Analyze the following git diff and generate a test plan:\n\n```diff\n{truncated_diff}\n```"
+        if component_context:
+            user_prompt += f"\n\nAdditional component context:\n{component_context}"
+
+        try:
+            client = self._get_client()
+
+            logger.info(
+                f"Sending diff ({len(truncated_diff)} chars) to Gemini ({self._model_name}) "
+                f"for test plan generation..."
+            )
+
+            response = client.models.generate_content(
+                model=self._model_name,
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=GEMINI_SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    response_schema=GEMINI_TEST_PLAN_SCHEMA,
+                    temperature=0.2,
+                ),
+            )
+
+            raw_text = response.text
+            if not raw_text:
+                return self._build_baseline_fallback(
+                    commit_sha, reason="Gemini returned empty response."
+                )
+
+            raw_json = json.loads(raw_text)
+            logger.info(
+                f"Gemini analysis complete. UI changes: {raw_json.get('has_ui_changes', 'unknown')}, "
+                f"Journeys: {len(raw_json.get('journeys', []))}"
+            )
+
+            return self._parse_gemini_response(raw_json, commit_sha)
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Gemini JSON response: {e}")
+            return self._build_baseline_fallback(
+                commit_sha, reason=f"Gemini response was not valid JSON: {e}"
+            )
+        except Exception as e:
+            logger.error(f"Gemini test plan generation failed: {e}")
+            return self._build_baseline_fallback(
+                commit_sha, reason=f"Gemini API error: {e}"
+            )
+
+    def load_cached_plan(self, commit_sha: str, cache_dir: str) -> Optional[TestPlan]:
+        """Load a previously generated test plan from the file cache.
+
+        Cache files are stored as `{cache_dir}/{commit_sha}.json`.
+        """
+        cache_path = Path(cache_dir) / f"{commit_sha}.json"
+        if not cache_path.is_file():
+            logger.debug(f"No cached test plan found for SHA {commit_sha[:8]}.")
+            return None
+
+        try:
+            raw = cache_path.read_text(encoding="utf-8")
+            plan = TestPlan.model_validate_json(raw)
+            logger.info(
+                f"Loaded cached test plan for SHA {commit_sha[:8]} "
+                f"(source={plan.source}, {len(plan.journeys)} journeys)."
+            )
+            return plan
+        except Exception as e:
+            logger.warning(f"Failed to load cached test plan for SHA {commit_sha[:8]}: {e}")
+            return None
+
+    def save_cached_plan(self, plan: TestPlan, cache_dir: str) -> None:
+        """Persist a generated test plan to the cache directory.
+
+        Creates the cache directory if it does not exist.
+        """
+        cache_path = Path(cache_dir)
+        cache_path.mkdir(parents=True, exist_ok=True)
+
+        output_file = cache_path / f"{plan.commit_sha}.json"
+        try:
+            output_file.write_text(
+                plan.model_dump_json(indent=2),
+                encoding="utf-8",
+            )
+            logger.info(
+                f"Cached test plan for SHA {plan.commit_sha[:8]} -> {output_file}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to cache test plan for SHA {plan.commit_sha[:8]}: {e}")
