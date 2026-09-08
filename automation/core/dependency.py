@@ -20,6 +20,18 @@ from automation.interfaces import (
     ISOpsService,
     IHealthCheckService,
     IBranchResolver,
+    IDatabaseStrategy,
+    ILifecycleSupervisor,
+    IProcessTreeManager,
+    ISchemaDetectorService,
+    IWireGuardService,
+)
+
+from automation.domain import (
+    WorkflowEnvironment,
+    GitPRDetails,
+    DatabaseConfig,
+    DatabaseStrategyType,
 )
 
 from automation.services.passthrough_intent_router_service import PassThroughIntentRouterService
@@ -39,6 +51,15 @@ from automation.services.secret_drift_service import SecretDriftDetectorService
 from automation.services.sops_service import SOpsService
 from automation.services.health_check_service import HealthCheckService
 from automation.services.branch_resolver_service import BranchResolverService
+from automation.services.database_strategies import (
+    DevCloudDatabaseStrategy,
+    EphemeralRunnerDatabaseStrategy,
+    create_database_strategy,
+)
+from automation.services.process_tree_manager import ProcessTreeManager
+from automation.services.lifecycle_supervisor_service import LifecycleSupervisorService
+from automation.services.schema_detection_service import SchemaDetectionService
+from automation.services.wireguard_service import WireGuardService
 
 
 @lru_cache(maxsize=1)
@@ -157,3 +178,43 @@ def get_branch_resolver_service(
     )
 
 
+def get_process_tree_manager() -> IProcessTreeManager:
+    """Returns IProcessTreeManager implementation."""
+    return ProcessTreeManager()
+
+
+def get_wireguard_service(wg_quick_binary: Optional[str] = None) -> IWireGuardService:
+    """Returns IWireGuardService implementation."""
+    return WireGuardService(wg_quick_binary=wg_quick_binary)
+
+
+def get_database_strategy(
+    config: Optional[DatabaseConfig] = None,
+    wireguard_service: Optional[IWireGuardService] = None,
+) -> IDatabaseStrategy:
+    """Returns IDatabaseStrategy implementation from configuration."""
+    if config is None:
+        return DevCloudDatabaseStrategy()
+    wg_svc = wireguard_service or get_wireguard_service()
+    return create_database_strategy(config, wireguard_service=wg_svc)
+
+
+
+def get_lifecycle_supervisor(
+    sops_service: Optional[ISOpsService] = None,
+    qa_contract_validator: Optional[IQAContractValidatorService] = None,
+    health_check_service: Optional[IHealthCheckService] = None,
+    process_tree_manager: Optional[IProcessTreeManager] = None,
+) -> ILifecycleSupervisor:
+    """Returns ILifecycleSupervisor implementation with injected services."""
+    return LifecycleSupervisorService(
+        sops_service=sops_service or get_sops_service(),
+        qa_contract_validator=qa_contract_validator or get_qa_contract_validator_service(),
+        health_check_service=health_check_service or get_health_check_service(),
+        process_tree_manager=process_tree_manager or get_process_tree_manager(),
+    )
+
+
+def get_schema_detector_service() -> ISchemaDetectorService:
+    """Returns ISchemaDetectorService implementation."""
+    return SchemaDetectionService()

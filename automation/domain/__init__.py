@@ -19,6 +19,30 @@ from automation.domain.branch_resolver import (
     BranchResolutionResult,
     AIExtractedBranch,
 )
+from automation.domain.database_strategy import (
+    DatabaseStrategyType,
+    MigrationResult,
+    DatabaseConfig,
+    NetworkProbeResult,
+    WireGuardConfig,
+)
+from automation.domain.lifecycle import (
+    ServiceStatus,
+    ServiceProcessInfo,
+    LifecycleResult,
+)
+from automation.domain.schema_detection import (
+    MigrationFramework,
+    ORMFramework,
+    DatabaseType,
+    SchemaSourceTier,
+    DetectedMigration,
+    DetectedORM,
+    DetectedSchemaFile,
+    DetectedDatabase,
+    DockerServiceDefinition,
+    SchemaDetectionResult,
+)
 
 __all__ = [
     "DEFAULT_GEMINI_MODEL",
@@ -43,4 +67,22 @@ __all__ = [
     "ResolutionSource",
     "BranchResolutionResult",
     "AIExtractedBranch",
+    "DatabaseStrategyType",
+    "MigrationResult",
+    "DatabaseConfig",
+    "NetworkProbeResult",
+    "WireGuardConfig",
+    "ServiceStatus",
+    "ServiceProcessInfo",
+    "LifecycleResult",
+    "MigrationFramework",
+    "ORMFramework",
+    "DatabaseType",
+    "SchemaSourceTier",
+    "DetectedMigration",
+    "DetectedORM",
+    "DetectedSchemaFile",
+    "DetectedDatabase",
+    "DockerServiceDefinition",
+    "SchemaDetectionResult",
 ]

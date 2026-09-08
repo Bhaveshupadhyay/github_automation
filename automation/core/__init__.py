@@ -18,6 +18,11 @@ from automation.core.dependency import (
     get_qa_contract_validator_service,
     get_health_check_service,
     get_branch_resolver_service,
+    get_process_tree_manager,
+    get_database_strategy,
+    get_lifecycle_supervisor,
+    get_schema_detector_service,
+    get_wireguard_service,
 )
 
 __all__ = [
@@ -40,4 +45,10 @@ __all__ = [
     "get_qa_contract_validator_service",
     "get_health_check_service",
     "get_branch_resolver_service",
+    "get_process_tree_manager",
+    "get_database_strategy",
+    "get_lifecycle_supervisor",
+    "get_schema_detector_service",
+    "get_wireguard_service",
 ]
+
