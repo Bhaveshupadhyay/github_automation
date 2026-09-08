@@ -23,11 +23,25 @@ from automation.domain.database_strategy import (
     DatabaseStrategyType,
     MigrationResult,
     DatabaseConfig,
+    NetworkProbeResult,
+    WireGuardConfig,
 )
 from automation.domain.lifecycle import (
     ServiceStatus,
     ServiceProcessInfo,
     LifecycleResult,
+)
+from automation.domain.schema_detection import (
+    MigrationFramework,
+    ORMFramework,
+    DatabaseType,
+    SchemaSourceTier,
+    DetectedMigration,
+    DetectedORM,
+    DetectedSchemaFile,
+    DetectedDatabase,
+    DockerServiceDefinition,
+    SchemaDetectionResult,
 )
 
 __all__ = [
@@ -56,7 +70,19 @@ __all__ = [
     "DatabaseStrategyType",
     "MigrationResult",
     "DatabaseConfig",
+    "NetworkProbeResult",
+    "WireGuardConfig",
     "ServiceStatus",
     "ServiceProcessInfo",
     "LifecycleResult",
+    "MigrationFramework",
+    "ORMFramework",
+    "DatabaseType",
+    "SchemaSourceTier",
+    "DetectedMigration",
+    "DetectedORM",
+    "DetectedSchemaFile",
+    "DetectedDatabase",
+    "DockerServiceDefinition",
+    "SchemaDetectionResult",
 ]

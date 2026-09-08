@@ -21,6 +21,8 @@ from automation.core.dependency import (
     get_process_tree_manager,
     get_database_strategy,
     get_lifecycle_supervisor,
+    get_schema_detector_service,
+    get_wireguard_service,
 )
 
 __all__ = [
@@ -46,5 +48,7 @@ __all__ = [
     "get_process_tree_manager",
     "get_database_strategy",
     "get_lifecycle_supervisor",
+    "get_schema_detector_service",
+    "get_wireguard_service",
 ]
 

@@ -1,12 +1,16 @@
 """CLI tool for orchestrating service lifecycles with DB provisioning, decryption, and health probes."""
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
 
-from automation.core.dependency import get_lifecycle_supervisor
-from automation.domain.database_strategy import DatabaseConfig, DatabaseStrategyType
-from automation.services.database_strategies import create_database_strategy
+from automation.core.dependency import get_database_strategy, get_lifecycle_supervisor
+from automation.domain.database_strategy import (
+    DatabaseConfig,
+    DatabaseStrategyType,
+    WireGuardConfig,
+)
 
 
 def main() -> None:
@@ -25,9 +29,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--db-strategy",
-        choices=["cloud_dev", "ephemeral_container"],
+        choices=["auto", "cloud_dev", "ephemeral_container"],
+        default="auto",
+        help="Database strategy (auto, cloud_dev, or ephemeral_container). In auto mode, attempts WireGuard/cloud DB probe first, then falls back to ephemeral local container (default: auto).",
+    )
+    parser.add_argument(
+        "--wireguard-conf",
         default=None,
-        help="Database strategy override (cloud_dev or ephemeral_container). Defaults to cloud_dev if DATABASE_URL is present, else ephemeral_container.",
+        help="Raw WireGuard configuration string or file path (defaults to WIREGUARD_CONF env var)",
     )
     parser.add_argument(
         "--sops-age-key",
@@ -64,8 +73,14 @@ def main() -> None:
     db_strategy = None
     if args.db_strategy:
         strat_type = DatabaseStrategyType(args.db_strategy)
-        cfg = DatabaseConfig(strategy_type=strat_type)
-        db_strategy = create_database_strategy(cfg)
+        wg_raw = args.wireguard_conf or os.getenv("WIREGUARD_CONF")
+        wg_cfg = WireGuardConfig(raw_config=wg_raw) if wg_raw else None
+        cfg = DatabaseConfig(
+            strategy_type=strat_type,
+            wireguard_config=wg_cfg,
+            connection_string=os.getenv("DATABASE_URL"),
+        )
+        db_strategy = get_database_strategy(cfg)
 
     backend_p = Path(args.backend_dir).resolve()
     frontend_p = Path(args.frontend_dir).resolve() if args.frontend_dir else None

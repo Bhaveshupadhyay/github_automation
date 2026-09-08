@@ -23,6 +23,8 @@ from automation.interfaces import (
     IDatabaseStrategy,
     ILifecycleSupervisor,
     IProcessTreeManager,
+    ISchemaDetectorService,
+    IWireGuardService,
 )
 
 from automation.domain import (
@@ -56,6 +58,8 @@ from automation.services.database_strategies import (
 )
 from automation.services.process_tree_manager import ProcessTreeManager
 from automation.services.lifecycle_supervisor_service import LifecycleSupervisorService
+from automation.services.schema_detection_service import SchemaDetectionService
+from automation.services.wireguard_service import WireGuardService
 
 
 @lru_cache(maxsize=1)
@@ -179,11 +183,20 @@ def get_process_tree_manager() -> IProcessTreeManager:
     return ProcessTreeManager()
 
 
-def get_database_strategy(config: Optional[DatabaseConfig] = None) -> IDatabaseStrategy:
+def get_wireguard_service(wg_quick_binary: Optional[str] = None) -> IWireGuardService:
+    """Returns IWireGuardService implementation."""
+    return WireGuardService(wg_quick_binary=wg_quick_binary)
+
+
+def get_database_strategy(
+    config: Optional[DatabaseConfig] = None,
+    wireguard_service: Optional[IWireGuardService] = None,
+) -> IDatabaseStrategy:
     """Returns IDatabaseStrategy implementation from configuration."""
+    wg_svc = wireguard_service or get_wireguard_service()
     if config:
-        return create_database_strategy(config)
-    return DevCloudDatabaseStrategy()
+        return create_database_strategy(config, wireguard_service=wg_svc)
+    return DevCloudDatabaseStrategy(wireguard_service=wg_svc)
 
 
 def get_lifecycle_supervisor(
@@ -201,4 +214,6 @@ def get_lifecycle_supervisor(
     )
 
 
-
+def get_schema_detector_service() -> ISchemaDetectorService:
+    """Returns ISchemaDetectorService implementation."""
+    return SchemaDetectionService()

@@ -1,10 +1,10 @@
-"""Concrete database strategies for automated QA orchestration."""
 import logging
 import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
+from urllib.parse import urlparse
 
 from automation.domain.database_strategy import (
     DatabaseConfig,
@@ -12,6 +12,7 @@ from automation.domain.database_strategy import (
     MigrationResult,
 )
 from automation.interfaces.database_strategy_interface import IDatabaseStrategy
+from automation.interfaces.wireguard_interface import IWireGuardService
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +31,13 @@ class DevCloudDatabaseStrategy(IDatabaseStrategy):
         test_user_email: str = "qa-runner@domain.com",
         isolated_tenant: bool = True,
         extra_env: Optional[Dict[str, str]] = None,
+        wireguard_service: Optional[IWireGuardService] = None,
     ) -> None:
         self.connection_string = connection_string
         self.test_user_email = test_user_email
         self.isolated_tenant = isolated_tenant
         self.extra_env = extra_env or {}
+        self.wireguard_service = wireguard_service
 
     def get_connection_env(self) -> Dict[str, str]:
         """Returns isolated cloud dev connection environment variables."""
@@ -106,7 +109,9 @@ class DevCloudDatabaseStrategy(IDatabaseStrategy):
             )
 
     def teardown(self) -> None:
-        """Cleans up isolated session resources."""
+        """Cleans up isolated session resources and tears down WireGuard tunnel if active."""
+        if self.wireguard_service:
+            self.wireguard_service.disconnect()
         logger.info("Cloud Dev DB teardown complete: isolated tenant session closed.")
 
 
@@ -214,13 +219,97 @@ class EphemeralRunnerDatabaseStrategy(IDatabaseStrategy):
         logger.info("Ephemeral runner database teardown complete.")
 
 
-def create_database_strategy(config: DatabaseConfig) -> IDatabaseStrategy:
-    """Factory creating an IDatabaseStrategy from a DatabaseConfig domain model."""
-    if config.strategy_type == DatabaseStrategyType.CLOUD_DEV:
+def _extract_host_port(connection_string: Optional[str], default_host: str = "localhost", default_port: int = 5432) -> Tuple[str, int]:
+    """Extracts target hostname and port from connection URI or defaults."""
+    if not connection_string:
+        return default_host, default_port
+    try:
+        parsed = urlparse(connection_string)
+        host = parsed.hostname or default_host
+        port = parsed.port or default_port
+        return host, port
+    except Exception:
+        return default_host, default_port
+
+
+def create_database_strategy(
+    config: DatabaseConfig,
+    wireguard_service: Optional[IWireGuardService] = None,
+) -> IDatabaseStrategy:
+    """Factory creating an IDatabaseStrategy from a DatabaseConfig domain model.
+
+    Supports AUTO mode:
+    1. If WireGuard config is provided, attempts to bring up the VPN tunnel.
+    2. Probes the remote database host:port via lightweight TCP handshake.
+    3. If reachable -> resolves to DevCloudDatabaseStrategy.
+    4. If unreachable or no remote DB specified -> gracefully falls back to EphemeralRunnerDatabaseStrategy.
+    """
+    if config.strategy_type == DatabaseStrategyType.AUTO:
+        # Step 1: Check if WireGuard VPN should be established
+        wg_connected = False
+        if config.wireguard_config and wireguard_service:
+            logger.info("AUTO DB Strategy: WireGuard configuration detected. Attempting connection...")
+            wg_connected = wireguard_service.connect(config.wireguard_config)
+            if wg_connected:
+                logger.info("AUTO DB Strategy: WireGuard tunnel established.")
+            else:
+                logger.warning("AUTO DB Strategy: WireGuard connection failed. Proceeding with probe/fallback.")
+
+        # Step 2: Probe remote database connectivity
+        target_host, target_port = _extract_host_port(config.connection_string, config.host, config.port)
+        is_remote_host = target_host not in ("localhost", "127.0.0.1", "::1", "")
+
+        if is_remote_host and wireguard_service:
+            logger.info("AUTO DB Strategy: Probing remote database %s:%d...", target_host, target_port)
+            probe = wireguard_service.probe_host(target_host, target_port, timeout_seconds=2.0)
+            if probe.reachable:
+                logger.info(
+                    "AUTO DB Strategy: Remote database %s:%d is reachable (latency: %.2fms). Selecting CLOUD_DEV.",
+                    target_host, target_port, probe.latency_ms,
+                )
+                return DevCloudDatabaseStrategy(
+                    connection_string=config.connection_string,
+                    test_user_email=config.test_user_email,
+                    wireguard_service=wireguard_service if wg_connected else None,
+                )
+            else:
+                logger.warning(
+                    "AUTO DB Strategy: Remote database %s:%d is unreachable (%s). "
+                    "Falling back to EPHEMERAL_CONTAINER.",
+                    target_host, target_port, probe.error_message,
+                )
+                if wg_connected and wireguard_service:
+                    wireguard_service.disconnect()
+        elif is_remote_host and not wireguard_service:
+            logger.info(
+                "AUTO DB Strategy: Remote host configured but no WireGuard service provided. Defaulting to CLOUD_DEV."
+            )
+            return DevCloudDatabaseStrategy(
+                connection_string=config.connection_string,
+                test_user_email=config.test_user_email,
+            )
+
+        # Fallback to ephemeral runner container
+        logger.info("AUTO DB Strategy: Selecting EPHEMERAL_CONTAINER mode.")
+        return EphemeralRunnerDatabaseStrategy(
+            host="localhost",
+            port=5432,
+            database_name=config.database_name,
+            username=config.username,
+            password=config.password,
+        )
+
+    elif config.strategy_type == DatabaseStrategyType.CLOUD_DEV:
+        wg_svc = None
+        if config.wireguard_config and wireguard_service:
+            wireguard_service.connect(config.wireguard_config)
+            wg_svc = wireguard_service
         return DevCloudDatabaseStrategy(
             connection_string=config.connection_string,
             test_user_email=config.test_user_email,
+            wireguard_service=wg_svc,
         )
+
     elif config.strategy_type == DatabaseStrategyType.EPHEMERAL_CONTAINER:
         return EphemeralRunnerDatabaseStrategy(
             host=config.host,
@@ -229,4 +318,6 @@ def create_database_strategy(config: DatabaseConfig) -> IDatabaseStrategy:
             username=config.username,
             password=config.password,
         )
+
     raise ValueError(f"Unsupported database strategy type: {config.strategy_type}")
+

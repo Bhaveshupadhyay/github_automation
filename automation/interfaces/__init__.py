@@ -18,6 +18,8 @@ from automation.interfaces.branch_resolver_interface import IBranchResolver
 from automation.interfaces.database_strategy_interface import IDatabaseStrategy
 from automation.interfaces.lifecycle_interface import ILifecycleSupervisor
 from automation.interfaces.process_tree_interface import IProcessTreeManager
+from automation.interfaces.schema_detector_interface import ISchemaDetectorService
+from automation.interfaces.wireguard_interface import IWireGuardService
 
 __all__ = [
     "ICodeDevelopmentService",
@@ -39,5 +41,7 @@ __all__ = [
     "IDatabaseStrategy",
     "ILifecycleSupervisor",
     "IProcessTreeManager",
+    "ISchemaDetectorService",
+    "IWireGuardService",
 ]
 
