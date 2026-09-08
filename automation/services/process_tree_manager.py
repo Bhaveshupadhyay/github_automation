@@ -29,7 +29,7 @@ class ProcessTreeManager(IProcessTreeManager):
         self._old_sigint_handler: Any = None
         self._old_sigterm_handler: Any = None
         self._traps_installed: bool = False
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def spawn_service_process(
         self,

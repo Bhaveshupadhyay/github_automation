@@ -74,7 +74,13 @@ def main() -> None:
     if args.db_strategy:
         strat_type = DatabaseStrategyType(args.db_strategy)
         wg_raw = args.wireguard_conf or os.getenv("WIREGUARD_CONF")
-        wg_cfg = WireGuardConfig(raw_config=wg_raw) if wg_raw else None
+        wg_cfg = None
+        if wg_raw:
+            wg_path = Path(wg_raw)
+            if wg_path.is_file():
+                wg_cfg = WireGuardConfig(config_file_path=str(wg_path))
+            else:
+                wg_cfg = WireGuardConfig(raw_config=wg_raw)
         cfg = DatabaseConfig(
             strategy_type=strat_type,
             wireguard_config=wg_cfg,

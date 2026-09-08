@@ -280,6 +280,7 @@ def create_database_strategy(
                 )
                 if wg_connected and wireguard_service:
                     wireguard_service.disconnect()
+                    wg_connected = False
         elif is_remote_host and not wireguard_service:
             logger.info(
                 "AUTO DB Strategy: Remote host configured but no WireGuard service provided. Defaulting to CLOUD_DEV."
@@ -291,6 +292,8 @@ def create_database_strategy(
 
         # Fallback to ephemeral runner container
         logger.info("AUTO DB Strategy: Selecting EPHEMERAL_CONTAINER mode.")
+        if wg_connected and wireguard_service:
+            wireguard_service.disconnect()
         return EphemeralRunnerDatabaseStrategy(
             host="localhost",
             port=5432,

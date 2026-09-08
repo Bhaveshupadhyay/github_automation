@@ -385,13 +385,13 @@ class SchemaDetectionService(ISchemaDetectorService):
         """Generates ordered setup commands based on the resolved tier."""
         commands: List[str] = []
 
-        if result.resolved_tier == SchemaSourceTier.MIGRATIONS:
+        if result.resolved_tier == SchemaSourceTier.MIGRATIONS and result.migrations:
             # Pick the highest-confidence migration framework
             best = max(result.migrations, key=lambda m: m.confidence)
             commands.append(f"# Tier 1: Run {best.framework.value} migrations")
             commands.append(best.setup_command)
 
-        elif result.resolved_tier == SchemaSourceTier.ORM_MODELS:
+        elif result.resolved_tier == SchemaSourceTier.ORM_MODELS and result.orm_models:
             best = max(result.orm_models, key=lambda o: o.confidence)
             commands.append(f"# Tier 2: Sync schema from {best.framework.value} models")
             commands.append(best.setup_command)
@@ -971,7 +971,7 @@ class SchemaDetectionService(ISchemaDetectorService):
 
             # PostgreSQL-specific syntax
             pg_signals = ["SERIAL", "BIGSERIAL", "UUID_GENERATE", "CREATE EXTENSION",
-                          "RETURNING", "INSERT INTO.*ON CONFLICT", "JSONB", "TEXT[]"]
+                          "RETURNING", "ON CONFLICT", "JSONB", "TEXT[]"]
             if any(sig in content_upper for sig in pg_signals):
                 return DatabaseType.POSTGRESQL
 
@@ -1004,12 +1004,15 @@ class SchemaDetectionService(ISchemaDetectorService):
 
         This is intentionally simple — we only need service names, images, and ports.
         For complex compose files, this covers the 90% case without requiring PyYAML.
+        Handles arbitrary valid indentation levels under services:.
         """
         services: Dict[str, Dict] = {}
         lines = content.splitlines()
         in_services = False
         current_service: Optional[str] = None
         current_key: Optional[str] = None
+        service_indent: Optional[int] = None
+        prop_indent: Optional[int] = None
 
         for line in lines:
             stripped = line.strip()
@@ -1019,13 +1022,15 @@ class SchemaDetectionService(ISchemaDetectorService):
             # Detect the `services:` top-level key
             if re.match(r"^services\s*:", line):
                 in_services = True
+                service_indent = None
+                prop_indent = None
                 continue
 
             if not in_services:
                 continue
 
             # Detect a top-level key other than services (end of services block)
-            if re.match(r"^[a-zA-Z]", line) and not line.startswith(" "):
+            if re.match(r"^[a-zA-Z0-9_-]+\s*:", line) and not line.startswith(" "):
                 in_services = False
                 current_service = None
                 continue
@@ -1033,63 +1038,72 @@ class SchemaDetectionService(ISchemaDetectorService):
             # Calculate indentation
             leading_spaces = len(line) - len(line.lstrip())
 
-            # Service name (2-space indent under services)
-            svc_match = re.match(r"^  ([a-zA-Z0-9_-]+)\s*:", line)
-            if svc_match and leading_spaces == 2:
-                current_service = svc_match.group(1)
-                services[current_service] = {"image": "", "ports": [], "environment": {}}
-                current_key = None
+            # Detect service name under services:
+            svc_match = re.match(r"^(\s+)([a-zA-Z0-9_-]+)\s*:", line)
+            if svc_match:
+                spaces = len(svc_match.group(1))
+                if service_indent is None:
+                    service_indent = spaces
+                if spaces == service_indent:
+                    current_service = svc_match.group(2)
+                    services[current_service] = {"image": "", "ports": [], "environment": {}}
+                    current_key = None
+                    prop_indent = None
+                    continue
+
+            if current_service is None or service_indent is None:
                 continue
 
-            if current_service is None:
-                continue
+            # Service-level properties (indented deeper than service name)
+            if leading_spaces > service_indent:
+                if prop_indent is None:
+                    if re.match(r"^\s+([a-zA-Z_]+)\s*:", line):
+                        prop_indent = leading_spaces
 
-            # Service-level properties (4-space indent, i.e. directly under service name)
-            if leading_spaces == 4:
-                # Image
-                img_match = re.match(r"^\s+image\s*:\s*(.+)", line)
-                if img_match:
-                    services[current_service]["image"] = img_match.group(1).strip().strip("'\"")
+                if prop_indent is not None and leading_spaces == prop_indent:
+                    img_match = re.match(r"^\s+image\s*:\s*(.+)", line)
+                    if img_match:
+                        services[current_service]["image"] = img_match.group(1).strip().strip("'\"")
+                        current_key = None
+                        continue
+
+                    # Ports list header
+                    if re.match(r"^\s+ports\s*:", line):
+                        current_key = "ports"
+                        continue
+
+                    # Environment header
+                    if re.match(r"^\s+environment\s*:", line):
+                        current_key = "environment"
+                        continue
+
+                    # Any other service-level property resets the current_key
                     current_key = None
                     continue
 
-                # Ports list header
-                if re.match(r"^\s+ports\s*:", line):
-                    current_key = "ports"
-                    continue
-
-                # Environment header
-                if re.match(r"^\s+environment\s*:", line):
-                    current_key = "environment"
-                    continue
-
-                # Any other service-level property resets the current_key
-                current_key = None
-                continue
-
-            # Items nested under a current_key (6+ space indent)
-            if leading_spaces >= 6 and current_key:
-                if current_key == "ports":
-                    port_match = re.match(r'^\s+-\s*["\']?([^"\']+)["\']?', line)
-                    if port_match:
-                        services[current_service]["ports"].append(port_match.group(1).strip())
-                    continue
-
-                if current_key == "environment":
-                    # List-style: - KEY=VALUE
-                    env_list_match = re.match(r'^\s+-\s*["\']?(\w+)=([^"\']*)["\']?', line)
-                    if env_list_match:
-                        services[current_service]["environment"][env_list_match.group(1)] = (
-                            env_list_match.group(2).strip()
-                        )
+                # Items nested under a current_key (indented deeper than prop_indent)
+                if current_key and (prop_indent is None or leading_spaces > prop_indent):
+                    if current_key == "ports":
+                        port_match = re.match(r'^\s+-\s*["\']?([^"\']+)["\']?', line)
+                        if port_match:
+                            services[current_service]["ports"].append(port_match.group(1).strip())
                         continue
-                    # Mapping-style: KEY: value
-                    env_match = re.match(r"^\s+(\w+)\s*:\s*(.+)", line)
-                    if env_match:
-                        services[current_service]["environment"][env_match.group(1)] = (
-                            env_match.group(2).strip().strip("'\"")
-                        )
-                        continue
+
+                    if current_key == "environment":
+                        # List-style: - KEY=VALUE
+                        env_list_match = re.match(r'^\s+-\s*["\']?(\w+)=([^"\']*)["\']?', line)
+                        if env_list_match:
+                            services[current_service]["environment"][env_list_match.group(1)] = (
+                                env_list_match.group(2).strip()
+                            )
+                            continue
+                        # Mapping-style: KEY: value
+                        env_match = re.match(r"^\s+(\w+)\s*:\s*(.+)", line)
+                        if env_match:
+                            services[current_service]["environment"][env_match.group(1)] = (
+                                env_match.group(2).strip().strip("'\"")
+                            )
+                            continue
 
         return services
 

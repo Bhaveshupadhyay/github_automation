@@ -40,25 +40,44 @@ class TestProcessTreeManager(unittest.TestCase):
 
     def test_forceful_termination_when_process_ignores_sigterm(self) -> None:
         """Process that ignores SIGTERM is forcefully terminated via SIGKILL after grace period."""
-        # Process ignores SIGTERM
-        proc = self.manager.spawn_service_process(
-            cmd=f"exec {sys.executable} -c 'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)'",
-            cwd=Path.cwd(),
-            env=os.environ.copy(),
-            name="test-stubborn",
-        )
-        self.assertIsNotNone(proc.pid)
-        self.assertIsNone(proc.poll())
-        time.sleep(0.15)  # Allow python interpreter to boot and register SIG_IGN
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            ready_path = Path(tmp.name)
+        ready_path.unlink(missing_ok=True)
 
-        start = time.monotonic()
-        # Use short timeout (0.5s) to trigger SIGKILL quickly
-        terminated = self.manager.terminate_process(proc, timeout=0.5)
-        duration = time.monotonic() - start
+        try:
+            cmd = (
+                f"exec {sys.executable} -c '"
+                f"import signal, time, pathlib; "
+                f"signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                f"pathlib.Path(\"{ready_path}\").touch(); "
+                f"time.sleep(30)'"
+            )
+            proc = self.manager.spawn_service_process(
+                cmd=cmd,
+                cwd=Path.cwd(),
+                env=os.environ.copy(),
+                name="test-stubborn",
+            )
+            self.assertIsNotNone(proc.pid)
+            self.assertIsNone(proc.poll())
 
-        self.assertTrue(terminated)
-        self.assertIsNotNone(proc.poll())
-        self.assertGreaterEqual(duration, 0.5)
+            # Explicit readiness synchronization with bounded timeout
+            poll_start = time.monotonic()
+            while not ready_path.exists() and (time.monotonic() - poll_start) < 3.0:
+                time.sleep(0.02)
+
+            self.assertTrue(ready_path.exists(), "Child failed to install SIG_IGN before termination test")
+
+            start = time.monotonic()
+            # Use short timeout (0.5s) to trigger SIGKILL quickly
+            terminated = self.manager.terminate_process(proc, timeout=0.5)
+            duration = time.monotonic() - start
+
+            self.assertTrue(terminated)
+            self.assertIsNotNone(proc.poll())
+            self.assertGreaterEqual(duration, 0.5)
+        finally:
+            ready_path.unlink(missing_ok=True)
 
     def test_terminate_all_cleans_multiple_processes(self) -> None:
         """terminate_all terminates all registered processes in reverse order."""

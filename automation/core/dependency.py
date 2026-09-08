@@ -193,10 +193,11 @@ def get_database_strategy(
     wireguard_service: Optional[IWireGuardService] = None,
 ) -> IDatabaseStrategy:
     """Returns IDatabaseStrategy implementation from configuration."""
+    if config is None:
+        return DevCloudDatabaseStrategy()
     wg_svc = wireguard_service or get_wireguard_service()
-    if config:
-        return create_database_strategy(config, wireguard_service=wg_svc)
-    return DevCloudDatabaseStrategy(wireguard_service=wg_svc)
+    return create_database_strategy(config, wireguard_service=wg_svc)
+
 
 
 def get_lifecycle_supervisor(

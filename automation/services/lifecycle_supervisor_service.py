@@ -95,13 +95,13 @@ class LifecycleSupervisorService(ILifecycleSupervisor):
         if enc_file.is_file():
             logger.info(f"Decrypting runtime secrets from {enc_file}...")
             transient_env_path = backend_path / ".env.qa.transient"
+            self._process_tree_manager.register_transient_file(transient_env_path)
             try:
                 decrypted_content = self._sops_service.decrypt_file(
                     encrypted_path=enc_file,
                     output_path=transient_env_path,
                     age_private_key=sops_age_key,
                 )
-                self._process_tree_manager.register_transient_file(transient_env_path)
                 decrypted_env = parse_dotenv_string(decrypted_content)
                 logger.info(f"Decrypted {len(decrypted_env)} environment variables into transient file.")
             except Exception as e:
@@ -260,17 +260,40 @@ class LifecycleSupervisorService(ILifecycleSupervisor):
             fe_prepare_cmd = frontend_contract.lifecycle.prepare if frontend_contract.lifecycle else frontend_contract.prepare
             if fe_prepare_cmd:
                 logger.info(f"Running frontend prepare hook: {fe_prepare_cmd}")
-                fe_prep_res = subprocess.run(
-                    fe_prepare_cmd,
-                    shell=True,
-                    cwd=str(frontend_path),
-                    env=frontend_proc_env,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                if fe_prep_res.returncode != 0:
-                    err = f"Frontend prepare command failed: {fe_prep_res.stderr or fe_prep_res.stdout}"
+                try:
+                    fe_prep_res = subprocess.run(
+                        fe_prepare_cmd,
+                        shell=True,
+                        cwd=str(frontend_path),
+                        env=frontend_proc_env,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                    )
+                    if fe_prep_res.returncode != 0:
+                        err = f"Frontend prepare command failed: {fe_prep_res.stderr or fe_prep_res.stdout}"
+                        logger.error(err)
+                        self.terminate_all()
+                        return LifecycleResult(
+                            success=False,
+                            backend_info=self._backend_info,
+                            db_strategy=db_strategy.__class__.__name__,
+                            error_message=err,
+                            startup_duration_seconds=time.monotonic() - start_time,
+                        )
+                except subprocess.TimeoutExpired:
+                    err = f"Frontend prepare command timed out after 120s: {fe_prepare_cmd}"
+                    logger.error(err)
+                    self.terminate_all()
+                    return LifecycleResult(
+                        success=False,
+                        backend_info=self._backend_info,
+                        db_strategy=db_strategy.__class__.__name__,
+                        error_message=err,
+                        startup_duration_seconds=time.monotonic() - start_time,
+                    )
+                except Exception as e:
+                    err = f"Frontend prepare command error: {e}"
                     logger.error(err)
                     self.terminate_all()
                     return LifecycleResult(

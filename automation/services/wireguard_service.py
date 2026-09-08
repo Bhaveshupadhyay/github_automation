@@ -21,6 +21,7 @@ class WireGuardService(IWireGuardService):
     def __init__(self, wg_quick_binary: Optional[str] = None) -> None:
         self.wg_quick_binary = wg_quick_binary or shutil.which("wg-quick") or "wg-quick"
         self._active_interface: Optional[str] = None
+        self._active_target: Optional[str] = None
         self._transient_config_path: Optional[Path] = None
 
     def is_available(self) -> bool:
@@ -87,17 +88,17 @@ class WireGuardService(IWireGuardService):
 
         try:
             logger.info("Bringing up WireGuard tunnel via %s for %s", self.wg_quick_binary, conf_path)
-            cmd = f"{self.wg_quick_binary} up {conf_path}"
+            cmd = [self.wg_quick_binary, "up", str(conf_path)]
             res = subprocess.run(
                 cmd,
-                shell=True,
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
             if res.returncode == 0:
+                self._active_target = str(conf_path)
                 self._active_interface = config.interface_name
-                logger.info("WireGuard interface %s brought up successfully.", config.interface_name)
+                logger.info("WireGuard tunnel for %s brought up successfully.", conf_path)
                 return True
             else:
                 logger.error("Failed to bring up WireGuard: %s\n%s", res.stdout, res.stderr)
@@ -110,28 +111,29 @@ class WireGuardService(IWireGuardService):
 
     def disconnect(self, interface_name: str = "wg0") -> bool:
         """Tears down the active WireGuard interface and securely shreds transient config."""
-        target_iface = self._active_interface or interface_name
+        target = self._active_target or self._active_interface or interface_name
         success = True
-        if self.is_available() and target_iface:
-            try:
-                logger.info("Tearing down WireGuard interface %s", target_iface)
-                cmd = f"{self.wg_quick_binary} down {target_iface}"
-                res = subprocess.run(
-                    cmd,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                if res.returncode != 0:
-                    logger.warning("wg-quick down exited with %d: %s", res.returncode, res.stderr)
+        try:
+            if self.is_available() and target:
+                try:
+                    logger.info("Tearing down WireGuard target %s", target)
+                    cmd = [self.wg_quick_binary, "down", str(target)]
+                    res = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    if res.returncode != 0:
+                        logger.warning("wg-quick down exited with %d: %s", res.returncode, res.stderr)
+                        success = False
+                except Exception as e:
+                    logger.warning("Error running wg-quick down: %s", e)
                     success = False
-            except Exception as e:
-                logger.warning("Error running wg-quick down: %s", e)
-                success = False
-
-        self._active_interface = None
-        self._cleanup_transient_config()
+        finally:
+            self._active_target = None
+            self._active_interface = None
+            self._cleanup_transient_config()
         return success
 
     def _cleanup_transient_config(self) -> None:

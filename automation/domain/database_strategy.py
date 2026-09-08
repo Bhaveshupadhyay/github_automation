@@ -15,7 +15,7 @@ class NetworkProbeResult(BaseModel):
     """Outcome of probing a remote database host and port."""
     reachable: bool = Field(..., description="Whether a TCP connection could be established")
     host: str = Field(..., description="Target host probed")
-    port: int = Field(..., description="Target port probed")
+    port: int = Field(..., ge=1, le=65535, description="Target port probed")
     latency_ms: float = Field(default=0.0, description="Connection latency in milliseconds")
     error_message: Optional[str] = Field(None, description="Failure reason if unreachable")
 
@@ -60,7 +60,7 @@ class DatabaseConfig(BaseModel):
         description="Isolated test account email for Cloud Dev database",
     )
     host: str = Field(default="localhost", description="Database server host")
-    port: int = Field(default=5432, description="Database server port")
+    port: int = Field(default=5432, ge=1, le=65535, description="Database server port")
     database_name: str = Field(default="testdb", description="Database name")
     username: str = Field(default="postgres", description="Database username")
     password: Optional[str] = Field(default=None, description="Database password")

@@ -208,7 +208,38 @@ class TestAutoDatabaseStrategyResolution(unittest.TestCase):
 
         strat = get_database_strategy()
         self.assertIsInstance(strat, DevCloudDatabaseStrategy)
+        self.assertIsNone(strat.wireguard_service)
+
+    def test_port_range_validation(self) -> None:
+        """DatabaseConfig and NetworkProbeResult reject port numbers outside 1..65535."""
+        from pydantic import ValidationError
+
+        with self.assertRaises(ValidationError):
+            DatabaseConfig(port=0)
+
+        with self.assertRaises(ValidationError):
+            DatabaseConfig(port=70000)
+
+        with self.assertRaises(ValidationError):
+            NetworkProbeResult(reachable=True, host="host", port=99999)
+
+    def test_auto_strategy_disconnects_wireguard_on_localhost_fallback(self) -> None:
+        """If WireGuard was connected but target host is localhost, WireGuard is disconnected before returning ephemeral strategy."""
+        mock_wg = MagicMock()
+        mock_wg.connect.return_value = True
+
+        cfg = DatabaseConfig(
+            strategy_type=DatabaseStrategyType.AUTO,
+            connection_string="postgresql://user:pass@localhost:5432/app",
+            wireguard_config=WireGuardConfig(raw_config="[Interface]..."),
+        )
+        strat = create_database_strategy(cfg, wireguard_service=mock_wg)
+
+        self.assertIsInstance(strat, EphemeralRunnerDatabaseStrategy)
+        mock_wg.connect.assert_called_once()
+        mock_wg.disconnect.assert_called_once()
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -614,7 +614,7 @@ class TestEdgeCases(unittest.TestCase):
     def test_nonexistent_repo_raises_error(self) -> None:
         """Passing a non-existent directory raises FileNotFoundError."""
         with self.assertRaises(FileNotFoundError):
-            self.svc.detect(Path("/tmp/does_not_exist_xyz123"))
+            self.svc.detect(self.repo / "does_not_exist_xyz123")
 
     def test_node_modules_excluded_from_orm_scan(self) -> None:
         """Files in node_modules/ are excluded from ORM scanning."""
@@ -732,6 +732,46 @@ class TestDockerComposeParser(unittest.TestCase):
         self.assertEqual(services["app"]["image"], "")
         self.assertEqual(services["postgres"]["image"], "postgres:16")
 
+    def test_four_space_indentation_handled(self) -> None:
+        """Docker Compose with 4-space service indentation is parsed correctly."""
+        content = textwrap.dedent("""\
+            services:
+                postgres:
+                    image: postgres:16
+                    ports:
+                        - "5432:5432"
+                    environment:
+                        POSTGRES_DB: mydb
+        """)
+        services = self.svc._parse_compose_services(content)
+        self.assertIn("postgres", services)
+        self.assertEqual(services["postgres"]["image"], "postgres:16")
+        self.assertIn("5432:5432", services["postgres"]["ports"])
+        self.assertEqual(services["postgres"]["environment"]["POSTGRES_DB"], "mydb")
+
+    def test_generate_setup_commands_handles_empty_migrations_list(self) -> None:
+        """generate_setup_commands does not raise ValueError when migrations list is empty."""
+        from automation.domain.schema_detection import SchemaDetectionResult
+        res = SchemaDetectionResult(
+            repo_dir="/tmp/dummy",
+            resolved_tier=SchemaSourceTier.MIGRATIONS,
+            migrations=[],
+        )
+        cmds = self.svc.generate_setup_commands(res)
+        self.assertTrue(any("No schema source detected" in c for c in cmds))
+
+    def test_infer_db_type_detects_on_conflict(self) -> None:
+        """PostgreSQL ON CONFLICT statement is correctly detected."""
+        tmp = tempfile.NamedTemporaryFile(suffix=".sql", delete=False)
+        p = Path(tmp.name)
+        try:
+            p.write_text("INSERT INTO users (id, name) VALUES (1, 'alice') ON CONFLICT (id) DO NOTHING;")
+            db_type = self.svc._infer_db_type_from_sql(p)
+            self.assertEqual(db_type, DatabaseType.POSTGRESQL)
+        finally:
+            p.unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main()
+
