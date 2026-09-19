@@ -364,5 +364,122 @@ class TestDiffTruncation:
         # Verify Gemini was called with truncated content
         call_args = mock_client.models.generate_content.call_args
         sent_content = call_args[1]["contents"] if "contents" in call_args[1] else call_args[0][0]
-        # The diff within the prompt should be truncated
-        assert "truncated" in sent_content.lower() or len(sent_content) < len(large_diff)
+        # The diff within the prompt should be truncated to the budget
+        sent_diff = sent_content.split("```diff\n", 1)[1].rsplit("\n```", 1)[0]
+        assert "[diff truncated for context limit]" in sent_diff
+        assert len(sent_diff) <= MAX_DIFF_CHARS
+
+    def test_header_heavy_diff_respects_budget(self):
+        """File headers are kept preferentially but still cannot exceed the budget."""
+        service = _make_service(_make_mock_client(SAMPLE_GEMINI_NO_UI_RESPONSE))
+        large_diff = "".join(
+            f"diff --git a/f{i}.tsx b/f{i}.tsx\n--- a/f{i}.tsx\n+++ b/f{i}.tsx\n@@ -1 +1 @@\n+ line\n"
+            for i in range(2000)
+        )
+
+        truncated = service._truncate_diff(large_diff)
+
+        assert len(truncated) <= MAX_DIFF_CHARS
+        assert truncated.endswith("[diff truncated for context limit] ...")
+
+    def test_headers_kept_after_content_budget_is_exhausted(self):
+        service = _make_service(_make_mock_client(SAMPLE_GEMINI_NO_UI_RESPONSE))
+        large_diff = (
+            "diff --git a/big.tsx b/big.tsx\n" + ("+ added line\n" * 1000)
+            + "diff --git a/small.tsx b/small.tsx\n+ tail line\n"
+        )
+
+        truncated = service._truncate_diff(large_diff)
+
+        assert "diff --git a/small.tsx b/small.tsx" in truncated
+        assert "+ tail line" not in truncated
+        assert len(truncated) <= MAX_DIFF_CHARS
+
+
+# --- Test: Action contract ---
+
+class TestActionContract:
+    """WAIT durations and fill/select values are validated on the model."""
+
+    def test_fallback_wait_uses_duration(self):
+        service = _make_service(_make_mock_client(SAMPLE_GEMINI_NO_UI_RESPONSE))
+
+        plan = service.generate_test_plan(diff="", commit_sha="fallback-sha")
+
+        wait = next(a for a in plan.journeys[0].actions if a.action_type == ActionType.WAIT)
+        assert wait.duration_ms == 2000
+        assert wait.target == ""
+
+    def test_legacy_numeric_wait_target_becomes_duration(self):
+        """Plans cached before duration_ms existed stored the duration in target."""
+        action = TestAction(action_type=ActionType.WAIT, target="1500", description="Wait")
+
+        assert action.duration_ms == 1500
+        assert action.target == ""
+
+    def test_wait_for_text_keeps_target(self):
+        action = TestAction(action_type=ActionType.WAIT, target="Submit", description="Wait")
+
+        assert action.duration_ms is None
+        assert action.target == "Submit"
+
+    @pytest.mark.parametrize("action_type", [ActionType.FILL, ActionType.SELECT])
+    def test_fill_and_select_require_value(self, action_type):
+        with pytest.raises(ValueError, match="requires a value"):
+            TestAction(action_type=action_type, target="Email", description="Missing value")
+
+    def test_gemini_fill_without_value_is_skipped(self):
+        response = {
+            "has_ui_changes": True,
+            "summary": "Form change",
+            "journeys": [
+                {
+                    "name": "Form",
+                    "entry_route": "/form",
+                    "actions": [
+                        {"action_type": "fill", "target": "Email", "description": "No value"},
+                        {"action_type": "click", "target": "Submit", "description": "Submit"},
+                    ],
+                    "assertions": [],
+                }
+            ],
+        }
+        service = _make_service(_make_mock_client(response))
+
+        plan = service.generate_test_plan(diff=SAMPLE_UI_DIFF, commit_sha="fill-sha")
+
+        assert [a.action_type for a in plan.journeys[0].actions] == [ActionType.CLICK]
+
+
+# --- Test: CLI git helpers ---
+
+class TestCliGitHelpers:
+    """The CLI must fail rather than cache plans under a wrong key or from a missing diff."""
+
+    @patch("automation.qa_test_generator_cli.subprocess.run")
+    def test_commit_sha_failure_raises(self, mock_run):
+        from automation.qa_test_generator_cli import get_commit_sha
+
+        mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="not a git repository")
+
+        with pytest.raises(RuntimeError, match="HEAD commit SHA"):
+            get_commit_sha()
+
+    @patch("automation.qa_test_generator_cli.subprocess.run")
+    def test_fallback_diff_failure_raises(self, mock_run):
+        from automation.qa_test_generator_cli import get_git_diff
+
+        mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="bad revision")
+
+        with pytest.raises(RuntimeError, match="Fallback git diff failed"):
+            get_git_diff("origin/main")
+
+    @patch("automation.qa_test_generator_cli.get_commit_sha", side_effect=RuntimeError("no HEAD."))
+    @patch("automation.core.get_diff_test_generator_service")
+    def test_main_does_not_cache_without_sha(self, mock_factory, mock_sha):
+        from automation import qa_test_generator_cli
+
+        with patch("sys.argv", ["qa-test-gen"]):
+            assert qa_test_generator_cli.main() == 1
+
+        mock_factory.return_value.save_cached_plan.assert_not_called()

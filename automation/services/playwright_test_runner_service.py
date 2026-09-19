@@ -4,10 +4,23 @@ import time
 from typing import Optional
 
 from automation.interfaces.test_runner_interface import ITestRunnerService
-from automation.domain.test_plan import TestPlan, ActionType, AssertionType
+from automation.domain.test_plan import TestPlan, TestAssertion, ActionType, AssertionType
 from automation.domain.test_run import TestRunConfig, TestRunResult, TestOutcome, TestCaseResult
 
 logger = logging.getLogger(__name__)
+
+# Assertion types whose target is visible text or an accessible label, not a CSS selector
+_ACCESSIBLE_ASSERTIONS = (AssertionType.ELEMENT_EXISTS, AssertionType.STATE_UPDATE, AssertionType.ALERT_MESSAGE)
+
+
+def _assertion_locator(page, assertion: TestAssertion):
+    """Resolve an assertion target to a Playwright locator."""
+    if assertion.type == AssertionType.VISIBLE_TEXT:
+        return page.get_by_text(assertion.target).first
+    if assertion.type == AssertionType.CSS_SELECTOR:
+        return page.locator(assertion.target)
+    return page.get_by_text(assertion.target).or_(page.get_by_label(assertion.target)).first
+
 
 class PlaywrightTestRunnerService(ITestRunnerService):
     """Playwright-based implementation of the test runner service for web applications."""
@@ -17,47 +30,67 @@ class PlaywrightTestRunnerService(ITestRunnerService):
         pass
 
     def generate_test_script(self, plan: TestPlan, output_dir: str) -> str:
-        """Convert a TestPlan into Playwright Python test files."""
+        """Convert a TestPlan into Playwright Python test files.
+
+        Relative routes resolve against the QA_BASE_URL environment variable
+        (default http://localhost:3000). Every plan value is emitted with repr()
+        so quotes or newlines in LLM output cannot break out of a string literal.
+        """
         os.makedirs(output_dir, exist_ok=True)
-        
+
         for i, journey in enumerate(plan.journeys):
             file_path = os.path.join(output_dir, f"test_journey_{i}.py")
             with open(file_path, "w", encoding="utf-8") as f:
+                f.write('import os\n\n')
                 f.write('from playwright.sync_api import sync_playwright, expect\n\n')
+                f.write('BASE_URL = os.environ.get("QA_BASE_URL", "http://localhost:3000")\n\n\n')
                 f.write(f'def test_journey_{i}():\n')
                 f.write('    with sync_playwright() as p:\n')
                 f.write('        browser = p.chromium.launch()\n')
-                f.write('        page = browser.new_page()\n')
-                
+                f.write('        context = browser.new_context(base_url=BASE_URL)\n')
+                f.write('        page = context.new_page()\n')
+
                 # Navigate to entry_route
-                f.write(f'        page.goto("{journey.entry_route}")\n')
-                
+                f.write(f'        page.goto({journey.entry_route!r})\n')
+
                 # Execute actions
                 for action in journey.actions:
+                    target = repr(action.target)
+                    value = repr(action.value)
                     if action.action_type == ActionType.NAVIGATE:
-                        f.write(f'        page.goto("{action.target}")\n')
+                        f.write(f'        page.goto({target})\n')
                     elif action.action_type == ActionType.CLICK:
-                        # Simplifying button/link logic, using text if possible or fallback to button role
-                        f.write(f'        try:\n')
-                        f.write(f'            page.get_by_role("button", name="{action.target}").click(timeout=2000)\n')
-                        f.write(f'        except:\n')
-                        f.write(f'            page.get_by_role("link", name="{action.target}").click()\n')
+                        f.write('        try:\n')
+                        f.write(f'            page.get_by_role("button", name={target}).click(timeout=2000)\n')
+                        f.write('        except Exception:\n')
+                        f.write(f'            page.get_by_role("link", name={target}).click()\n')
                     elif action.action_type == ActionType.FILL:
-                        f.write(f'        page.get_by_label("{action.target}").fill("{action.value}")\n')
+                        f.write(f'        page.get_by_label({target}).fill({value})\n')
                     elif action.action_type == ActionType.SCROLL:
-                        f.write(f'        page.mouse.wheel(0, 500)\n')
+                        f.write('        page.mouse.wheel(0, 500)\n')
                     elif action.action_type == ActionType.SELECT:
-                        f.write(f'        page.get_by_label("{action.target}").select_option("{action.value}")\n')
+                        f.write(f'        page.get_by_label({target}).select_option({value})\n')
                     elif action.action_type == ActionType.WAIT:
-                        f.write(f'        page.wait_for_timeout(3000)\n')
+                        if action.duration_ms is not None:
+                            f.write(f'        page.wait_for_timeout({action.duration_ms})\n')
+                        elif action.target:
+                            f.write(f'        expect(page.get_by_text({target}).first).to_be_visible()\n')
+                        else:
+                            f.write('        page.wait_for_load_state()\n')
 
                 # Execute assertions
                 for assertion in journey.assertions:
+                    target = repr(assertion.target)
                     if assertion.type == AssertionType.VISIBLE_TEXT:
-                        f.write(f'        expect(page.get_by_text("{assertion.target}")).to_be_visible()\n')
-                    elif assertion.type in (AssertionType.ELEMENT_EXISTS, AssertionType.STATE_UPDATE, AssertionType.ALERT_MESSAGE):
-                        f.write(f'        expect(page.locator("{assertion.target}")).to_be_visible()\n')
-                
+                        f.write(f'        expect(page.get_by_text({target}).first).to_be_visible()\n')
+                    elif assertion.type == AssertionType.CSS_SELECTOR:
+                        f.write(f'        expect(page.locator({target})).to_be_visible()\n')
+                    elif assertion.type in _ACCESSIBLE_ASSERTIONS:
+                        f.write(
+                            f'        expect(page.get_by_text({target}).or_(page.get_by_label({target})).first)'
+                            '.to_be_visible()\n'
+                        )
+
                 f.write('        browser.close()\n')
 
         return output_dir
@@ -80,7 +113,8 @@ class PlaywrightTestRunnerService(ITestRunnerService):
         raw_video_paths = []
         
         start_time = time.time()
-        
+        session_failed = False
+
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=config.headless)
@@ -131,14 +165,16 @@ class PlaywrightTestRunnerService(ITestRunnerService):
                             elif action.action_type == ActionType.SELECT:
                                 page.get_by_label(action.target).select_option(action.value, timeout=config.timeout_ms)
                             elif action.action_type == ActionType.WAIT:
-                                page.wait_for_timeout(3000)
-                                
+                                if action.duration_ms is not None:
+                                    page.wait_for_timeout(action.duration_ms)
+                                elif action.target:
+                                    expect(page.get_by_text(action.target).first).to_be_visible(timeout=config.timeout_ms)
+                                else:
+                                    page.wait_for_load_state(timeout=config.timeout_ms)
+
                         # Execute assertions
                         for assertion in journey.assertions:
-                            if assertion.type == AssertionType.VISIBLE_TEXT:
-                                expect(page.get_by_text(assertion.target)).to_be_visible(timeout=config.timeout_ms)
-                            elif assertion.type in (AssertionType.ELEMENT_EXISTS, AssertionType.STATE_UPDATE, AssertionType.ALERT_MESSAGE):
-                                expect(page.locator(assertion.target)).to_be_visible(timeout=config.timeout_ms)
+                            expect(_assertion_locator(page, assertion)).to_be_visible(timeout=config.timeout_ms)
                                 
                     except Exception as e:
                         outcome = TestOutcome.FAILED
@@ -188,19 +224,22 @@ class PlaywrightTestRunnerService(ITestRunnerService):
                 browser.close()
         except Exception as e:
             logger.error(f"Playwright execution failed: {e}")
-            return TestRunResult(
-                overall_outcome=TestOutcome.FAILED,
-                total_tests=len(config.test_plan.journeys),
-                failed=len(config.test_plan.journeys),
-                duration_seconds=time.time() - start_time
-            )
-            
+            session_failed = True
+            # Keep results for journeys that finished; mark the rest as failed
+            for journey in config.test_plan.journeys[len(test_results):]:
+                test_results.append(TestCaseResult(
+                    journey_name=journey.name,
+                    outcome=TestOutcome.FAILED,
+                    failure_message=f"Playwright session failed: {e}",
+                ))
+
+
         passed = sum(1 for r in test_results if r.outcome == TestOutcome.PASSED)
         failed = sum(1 for r in test_results if r.outcome == TestOutcome.FAILED)
         skipped = sum(1 for r in test_results if r.outcome == TestOutcome.SKIPPED)
         
         overall_outcome = TestOutcome.PASSED
-        if failed > 0:
+        if failed > 0 or session_failed:
             overall_outcome = TestOutcome.FAILED
         elif passed == 0 and skipped > 0:
             overall_outcome = TestOutcome.SKIPPED

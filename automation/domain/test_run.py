@@ -19,6 +19,9 @@ class TestRunConfig(BaseModel):
     """Configuration for executing a test plan against a running application."""
     __test__ = False
     base_url: str = Field(..., description="Application base URL, e.g. 'http://localhost:3000'")
+    app_id: Optional[str] = Field(
+        default=None, description="Mobile application ID (Android package / iOS bundle ID). Required for Maestro"
+    )
     test_plan: TestPlan = Field(..., description="The test plan to execute")
     video_output_dir: str = Field(..., description="Directory for raw video recordings")
     headless: bool = Field(default=True, description="Run browser in headless mode")

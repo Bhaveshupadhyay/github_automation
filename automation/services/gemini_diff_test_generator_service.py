@@ -43,7 +43,9 @@ Your task:
 Rules for test journeys:
 - Each journey targets ONE specific user flow affected by the diff.
 - Use accessible selectors: role-based (button, link, textbox, heading) and visible text. NEVER use CSS selectors or test IDs.
-- Actions should be realistic user interactions: navigate, click, fill, scroll, select.
+- Actions should be realistic user interactions: navigate, click, fill, scroll, select, wait.
+- fill and select actions MUST include a value.
+- wait actions either set target to the visible text to wait for, or leave target empty and set duration_ms.
 - Assertions should verify VISIBLE outcomes: text appears, elements exist, alerts show, state updates.
 - Keep journeys focused and concise (3-8 actions each).
 - Maximum 5 journeys per plan.
@@ -74,6 +76,7 @@ GEMINI_TEST_PLAN_SCHEMA = {
                                 },
                                 "target": {"type": "string"},
                                 "value": {"type": "string"},
+                                "duration_ms": {"type": "integer"},
                                 "description": {"type": "string"},
                             },
                             "required": ["action_type", "target", "description"],
@@ -168,13 +171,14 @@ class GeminiDiffTestGeneratorService(IDiffTestGeneratorService):
                         ),
                         TestAction(
                             action_type=ActionType.WAIT,
-                            target="2000",
+                            target="",
+                            duration_ms=2000,
                             description="Wait for application to fully render",
                         ),
                     ],
                     assertions=[
                         TestAssertion(
-                            type=AssertionType.ELEMENT_EXISTS,
+                            type=AssertionType.CSS_SELECTOR,
                             target="body",
                             description="Verify the page body is rendered",
                         ),
@@ -197,27 +201,44 @@ class GeminiDiffTestGeneratorService(IDiffTestGeneratorService):
             f"Truncating to prevent Gemini context overflow."
         )
 
-        lines = diff.splitlines()
-        truncated_lines: list[str] = []
-        current_chars = 0
-
-        for line in lines:
-            # Always include file path headers and function context markers
-            is_priority = (
+        def is_priority(line: str) -> bool:
+            # File path headers and hunk markers
+            return (
                 line.startswith("diff --git")
                 or line.startswith("---")
                 or line.startswith("+++")
                 or line.startswith("@@")
             )
 
+        marker = "... [diff truncated for context limit] ..."
+        budget = MAX_DIFF_CHARS - len(marker) - 1  # Reserve room for the marker line
+        lines = diff.splitlines()
+
+        # Reserve room for every header first, so headers of later files survive
+        # even after earlier files' content has used up its share.
+        priority_chars = sum(len(line) + 1 for line in lines if is_priority(line))
+        content_budget = max(budget - priority_chars, 0)
+
+        truncated_lines: list[str] = []
+        total_chars = 0
+        content_chars = 0
+        content_exhausted = False
+
+        for line in lines:
             line_len = len(line) + 1  # +1 for newline
-            if current_chars + line_len > MAX_DIFF_CHARS and not is_priority:
-                truncated_lines.append("... [diff truncated for context limit] ...")
-                break
+            if is_priority(line):
+                if total_chars + line_len > budget:
+                    break
+            else:
+                if content_exhausted or content_chars + line_len > content_budget:
+                    content_exhausted = True
+                    continue
+                content_chars += line_len
 
             truncated_lines.append(line)
-            current_chars += line_len
+            total_chars += line_len
 
+        truncated_lines.append(marker)
         return "\n".join(truncated_lines)
 
     def _parse_gemini_response(self, raw_json: dict, commit_sha: str) -> TestPlan:
@@ -248,6 +269,7 @@ class GeminiDiffTestGeneratorService(IDiffTestGeneratorService):
                             action_type=ActionType(raw_a["action_type"]),
                             target=raw_a["target"],
                             value=raw_a.get("value"),
+                            duration_ms=raw_a.get("duration_ms"),
                             description=raw_a.get("description", ""),
                         )
                     )

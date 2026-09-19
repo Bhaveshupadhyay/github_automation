@@ -243,15 +243,17 @@ def get_diff_test_generator_service(
 def get_test_runner_service(
     runner_type: str = "playwright",
     maestro_binary: Optional[str] = None,
+    app_id: Optional[str] = None,
 ) -> ITestRunnerService:
     """Returns ITestRunnerService implementation.
 
     Args:
         runner_type: 'playwright' for web testing or 'maestro' for mobile testing.
         maestro_binary: Optional path to the Maestro CLI binary.
+        app_id: Mobile application ID used by Maestro flows (overridable per run via TestRunConfig.app_id).
     """
     if runner_type == "maestro":
-        return MaestroTestRunnerService(maestro_binary=maestro_binary)
+        return MaestroTestRunnerService(maestro_binary=maestro_binary, app_id=app_id)
     return PlaywrightTestRunnerService()
 
 

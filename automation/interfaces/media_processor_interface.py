@@ -56,14 +56,23 @@ class IMediaProcessorService(ABC):
         self,
         raw_video_path: str,
         output_dir: str,
+        crf: int = 28,
+        gif_duration_seconds: int = 8,
+        gif_fps: int = 10,
+        gif_width: int = 640,
     ) -> MediaProcessingResult:
         """Full media processing pipeline: compress video + generate preview GIF.
 
         Args:
             raw_video_path: Path to the raw recording from Playwright or Maestro.
             output_dir: Directory to write compressed MP4 and preview GIF files.
+            crf: Constant Rate Factor for H.264 encoding (default: 28).
+            gif_duration_seconds: Seconds of video to include in the GIF (default: 8).
+            gif_fps: Frame rate of the GIF (default: 10).
+            gif_width: Width of the GIF in pixels (default: 640).
 
         Returns:
-            MediaProcessingResult containing both processed artifacts.
+            MediaProcessingResult with whichever artifacts were produced. success is
+            True only when both the compressed video and the GIF were produced.
         """
         pass

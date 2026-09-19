@@ -57,12 +57,13 @@ def main():
         default=640,
         help="Width of the preview GIF in pixels (default: 640, height auto-scaled).",
     )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--compress-only",
         action="store_true",
         help="Only compress video, skip GIF generation.",
     )
-    parser.add_argument(
+    mode_group.add_argument(
         "--gif-only",
         action="store_true",
         help="Only generate GIF, skip video compression.",
@@ -125,21 +126,28 @@ def main():
     else:
         # Full pipeline
         try:
-            result = service.process(str(input_path), output_dir)
+            result = service.process(
+                str(input_path),
+                output_dir,
+                crf=args.crf,
+                gif_duration_seconds=args.gif_duration,
+                gif_fps=args.gif_fps,
+                gif_width=args.gif_width,
+            )
 
             if result.success:
                 logger.info("✅ Media processing complete:")
-                if result.compressed_video:
-                    logger.info(
-                        f"  📹 Video: {result.compressed_video.output_path} "
-                        f"({result.compressed_video.file_size_bytes / (1024*1024):.2f} MB)"
-                    )
-                if result.preview_gif:
-                    logger.info(
-                        f"  🎞️  GIF:   {result.preview_gif.output_path} "
-                        f"({result.preview_gif.file_size_bytes / (1024*1024):.2f} MB)"
-                    )
-            else:
+            if result.compressed_video:
+                logger.info(
+                    f"  📹 Video: {result.compressed_video.output_path} "
+                    f"({result.compressed_video.file_size_bytes / (1024*1024):.2f} MB)"
+                )
+            if result.preview_gif:
+                logger.info(
+                    f"  🎞️  GIF:   {result.preview_gif.output_path} "
+                    f"({result.preview_gif.file_size_bytes / (1024*1024):.2f} MB)"
+                )
+            if not result.success:
                 logger.error(f"❌ Media processing failed: {result.error_message}")
                 return 1
 

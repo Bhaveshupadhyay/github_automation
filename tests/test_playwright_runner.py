@@ -1,4 +1,5 @@
 """Unit tests for PlaywrightTestRunnerService."""
+import ast
 import os
 import tempfile
 from unittest.mock import MagicMock, patch
@@ -134,9 +135,87 @@ class TestGenerateTestScript:
             assert len(files) == 0
 
 
-class TestExecute:
-    """Tests for the execute method (mocking Playwright browser)."""
+    def test_script_escapes_plan_values(self):
+        """Quotes and newlines in plan values must not break out of string literals."""
+        service = PlaywrightTestRunnerService()
+        injected = 'x")\nimport os; os.system("echo pwned")  # "'
+        plan = TestPlan(
+            commit_sha="esc-sha",
+            source="gemini",
+            journeys=[
+                TestJourney(
+                    name="Escaping",
+                    entry_route='/a"b',
+                    actions=[
+                        TestAction(action_type=ActionType.FILL, target=injected, value=injected, description="Fill"),
+                        TestAction(action_type=ActionType.CLICK, target=injected, description="Click"),
+                    ],
+                    assertions=[
+                        TestAssertion(type=AssertionType.ELEMENT_EXISTS, target=injected, description="Exists"),
+                    ],
+                ),
+            ],
+        )
 
+        with tempfile.TemporaryDirectory() as output_dir:
+            service.generate_test_script(plan, output_dir)
+            script_content = open(os.path.join(output_dir, "test_journey_0.py")).read()
+
+        tree = ast.parse(script_content)
+        assert not any(isinstance(n, ast.Attribute) and n.attr == "system" for n in ast.walk(tree))
+        assert repr(injected) in script_content
+
+    def test_script_resolves_routes_against_base_url(self):
+        service = PlaywrightTestRunnerService()
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            service.generate_test_script(_make_plan(), output_dir)
+            script_content = open(os.path.join(output_dir, "test_journey_0.py")).read()
+
+        assert 'os.environ.get("QA_BASE_URL"' in script_content
+        assert "browser.new_context(base_url=BASE_URL)" in script_content
+        assert "page.goto('/login')" in script_content
+
+    def test_script_uses_wait_duration(self):
+        service = PlaywrightTestRunnerService()
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            service.generate_test_script(_make_plan(), output_dir)
+            script_content = open(os.path.join(output_dir, "test_journey_1.py")).read()
+
+        assert "page.wait_for_timeout(2000)" in script_content
+        assert "wait_for_timeout(3000)" not in script_content
+
+    def test_accessible_assertions_do_not_use_css_locator(self):
+        service = PlaywrightTestRunnerService()
+        plan = TestPlan(
+            commit_sha="a11y-sha",
+            source="gemini",
+            journeys=[
+                TestJourney(
+                    name="Assertions",
+                    entry_route="/",
+                    assertions=[
+                        TestAssertion(type=AssertionType.ELEMENT_EXISTS, target="Profile Icon", description="Icon"),
+                        TestAssertion(type=AssertionType.CSS_SELECTOR, target="body", description="Body"),
+                    ],
+                ),
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            service.generate_test_script(plan, output_dir)
+            script_content = open(os.path.join(output_dir, "test_journey_0.py")).read()
+
+        assert "page.get_by_text('Profile Icon').or_(page.get_by_label('Profile Icon'))" in script_content
+        assert "page.locator('Profile Icon')" not in script_content
+        assert "page.locator('body')" in script_content
+
+
+class TestExecute:
+    """Tests for the execute method."""
+
+    @patch.dict("sys.modules", {"playwright": None, "playwright.sync_api": None})
     def test_playwright_not_installed_returns_skipped(self):
         """When playwright package is not available, execution returns SKIPPED."""
         service = PlaywrightTestRunnerService()
@@ -148,29 +227,57 @@ class TestExecute:
                 test_plan=plan,
                 video_output_dir=video_dir,
             )
+            result = service.execute(config)
 
-            # Simulate playwright not being importable
-            with patch.dict("sys.modules", {"playwright": None, "playwright.sync_api": None}):
-                # The service catches ImportError internally
-                # Since we can't easily prevent the import from inside the method
-                # without modifying the service, we test that it handles missing playwright gracefully
-                # by checking the service itself handles it
-                pass
+        assert result.overall_outcome == TestOutcome.SKIPPED
+        assert result.total_tests == len(plan.journeys)
+        assert result.skipped == len(plan.journeys)
 
+    @patch.dict("sys.modules", {"playwright": None, "playwright.sync_api": None})
     def test_execute_creates_video_output_dir(self):
         """The execute method should create the video output directory."""
         service = PlaywrightTestRunnerService()
-        plan = _make_plan()
 
         with tempfile.TemporaryDirectory() as base_dir:
             video_dir = os.path.join(base_dir, "videos", "nested")
             config = TestRunConfig(
                 base_url="http://localhost:3000",
-                test_plan=plan,
+                test_plan=_make_plan(),
                 video_output_dir=video_dir,
             )
+            service.execute(config)
 
-            # We can't run actual Playwright without a browser, but we can verify
-            # the directory creation logic works by checking the method exists
-            assert hasattr(service, 'execute')
-            assert callable(service.execute)
+            assert os.path.isdir(video_dir)
+
+    def test_session_failure_keeps_finished_results(self):
+        """If the browser dies mid-run, finished journeys keep their results."""
+        service = PlaywrightTestRunnerService()
+        plan = _make_plan()
+
+        page = MagicMock()
+        page.video = None
+        context = MagicMock()
+        context.new_page.return_value = page
+        browser = MagicMock()
+        browser.new_context.side_effect = [context, RuntimeError("browser crashed")]
+        playwright = MagicMock()
+        playwright.chromium.launch.return_value = browser
+        sync_api = MagicMock()
+        sync_api.sync_playwright.return_value.__enter__.return_value = playwright
+
+        with tempfile.TemporaryDirectory() as video_dir:
+            config = TestRunConfig(
+                base_url="http://localhost:3000",
+                test_plan=plan,
+                video_output_dir=video_dir,
+                trace_on_failure=False,
+            )
+            with patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.sync_api": sync_api}):
+                result = service.execute(config)
+
+        assert result.overall_outcome == TestOutcome.FAILED
+        assert result.total_tests == 2
+        assert result.passed == 1
+        assert result.failed == 1
+        assert result.test_results[0].outcome == TestOutcome.PASSED
+        assert "browser crashed" in result.test_results[1].failure_message

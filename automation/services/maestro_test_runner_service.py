@@ -1,4 +1,5 @@
 """Maestro native mobile test runner service implementation."""
+import json
 import logging
 import shutil
 import subprocess
@@ -21,65 +22,88 @@ logger = logging.getLogger(__name__)
 class MaestroTestRunnerService(ITestRunnerService):
     """Executes mobile UI tests using the Maestro CLI engine."""
 
-    def __init__(self, maestro_binary: Optional[str] = None):
+    def __init__(
+        self,
+        maestro_binary: Optional[str] = None,
+        app_id: Optional[str] = None,
+        flow_timeout_seconds: int = 600,
+    ):
         self._maestro_binary = maestro_binary or shutil.which("maestro") or "maestro"
+        self._app_id = app_id
+        self._flow_timeout_seconds = flow_timeout_seconds
 
     def _is_maestro_available(self) -> bool:
         """Returns True if the maestro binary is discoverable and executable."""
         return shutil.which(self._maestro_binary) is not None
 
-    def generate_test_script(self, plan: TestPlan, output_dir: str) -> str:
+    def generate_test_script(self, plan: TestPlan, output_dir: str, app_id: Optional[str] = None) -> str:
         """Convert a TestPlan into Maestro YAML flow files.
 
         Args:
             plan: The structured test plan to convert.
             output_dir: Directory to write generated test script files.
+            app_id: Mobile application ID. Defaults to the ID given to the constructor.
 
         Returns:
             Path to the output directory containing the flows.
+
+        Raises:
+            ValueError: If no application ID is configured.
         """
+        app_id = app_id or self._app_id
+        if not app_id:
+            raise ValueError("Maestro flows require an app_id (Android package or iOS bundle ID).")
+
         out_path = Path(output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
+
+        # JSON strings are valid YAML scalars, so plan values containing ':', '#' or
+        # newlines stay a single scalar instead of changing the flow's structure.
+        q = json.dumps
 
         for i, journey in enumerate(plan.journeys):
             flow_name = f"flow_journey_{i}.yaml"
             flow_path = out_path / flow_name
 
-            # Maestro flows start with appId. We use a placeholder or derive from entry_route
-            app_id = "com.example.app" 
-            lines = [f"appId: {app_id}", "---"]
+            lines = [f"appId: {q(app_id)}", "---"]
 
             for action in journey.actions:
                 if action.action_type == ActionType.NAVIGATE:
                     if action.target.startswith("http://") or action.target.startswith("https://"):
-                        lines.append(f"- openLink: {action.target}")
+                        lines.append(f"- openLink: {q(action.target)}")
                     else:
                         lines.append("- launchApp")
                 elif action.action_type == ActionType.CLICK:
-                    lines.append(f"- tapOn: {action.target}")
+                    lines.append(f"- tapOn: {q(action.target)}")
                 elif action.action_type == ActionType.FILL:
-                    lines.append(f"- tapOn: {action.target}")
-                    lines.append(f"- inputText: {action.value}")
+                    lines.append(f"- tapOn: {q(action.target)}")
+                    lines.append(f"- inputText: {q(action.value)}")
                 elif action.action_type == ActionType.SCROLL:
                     lines.append("- scroll")
                 elif action.action_type == ActionType.SELECT:
-                    lines.append(f"- tapOn: {action.target}")
-                    lines.append(f"- tapOn: {action.value}")
+                    lines.append(f"- tapOn: {q(action.target)}")
+                    lines.append(f"- tapOn: {q(action.value)}")
                 elif action.action_type == ActionType.WAIT:
                     if action.target:
                         lines.append("- extendedWaitUntil:")
-                        lines.append(f"    visible: {action.target}")
+                        lines.append(f"    visible: {q(action.target)}")
+                        if action.duration_ms is not None:
+                            lines.append(f"    timeout: {action.duration_ms}")
+                    elif action.duration_ms is not None:
+                        lines.append("- waitForAnimationToEnd:")
+                        lines.append(f"    timeout: {action.duration_ms}")
                     else:
                         lines.append("- waitForAnimationToEnd")
 
             for assertion in journey.assertions:
+                # CSS selectors have no meaning in a native app, so they are skipped
                 if assertion.type in (
                     AssertionType.VISIBLE_TEXT,
                     AssertionType.ELEMENT_EXISTS,
                     AssertionType.ALERT_MESSAGE,
                     AssertionType.STATE_UPDATE,
                 ):
-                    lines.append(f"- assertVisible: {assertion.target}")
+                    lines.append(f"- assertVisible: {q(assertion.target)}")
 
             flow_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -99,6 +123,7 @@ class MaestroTestRunnerService(ITestRunnerService):
             return TestRunResult(
                 overall_outcome=TestOutcome.SKIPPED,
                 total_tests=len(config.test_plan.journeys),
+                skipped=len(config.test_plan.journeys),
             )
 
         video_dir = Path(config.video_output_dir)
@@ -106,7 +131,7 @@ class MaestroTestRunnerService(ITestRunnerService):
 
         # Generate scripts in a subdirectory of video output for convenience
         script_dir = video_dir / "scripts"
-        self.generate_test_script(config.test_plan, str(script_dir))
+        self.generate_test_script(config.test_plan, str(script_dir), app_id=config.app_id)
 
         results = []
         overall_outcome = TestOutcome.PASSED
@@ -120,7 +145,7 @@ class MaestroTestRunnerService(ITestRunnerService):
             flow_file = script_dir / f"flow_journey_{i}.yaml"
             junit_file = script_dir / f"junit_{i}.xml"
             video_name = journey.name.replace(" ", "_").replace("/", "_")
-            video_file = video_dir / f"{video_name}.mp4"
+            video_file = video_dir / f"{i}_{video_name}.mp4"
 
             cmd = [
                 self._maestro_binary, "test",
@@ -137,8 +162,10 @@ class MaestroTestRunnerService(ITestRunnerService):
             duration = 0.0
 
             try:
-                process = subprocess.run(cmd, capture_output=True, text=True)
-                
+                process = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=self._flow_timeout_seconds
+                )
+
                 # Parse JUnit XML if available
                 if junit_file.exists():
                     try:
@@ -162,7 +189,10 @@ class MaestroTestRunnerService(ITestRunnerService):
                     else:
                         failure_msg = process.stderr.strip() or "Maestro process failed without JUnit output"
 
-            except subprocess.SubprocessError as e:
+            except subprocess.TimeoutExpired:
+                logger.error(f"Maestro flow timed out after {self._flow_timeout_seconds}s: {journey.name}")
+                failure_msg = f"Maestro flow timed out after {self._flow_timeout_seconds} seconds"
+            except (subprocess.SubprocessError, OSError) as e:
                 logger.error(f"Maestro subprocess execution failed: {e}")
                 failure_msg = f"Execution error: {str(e)}"
             

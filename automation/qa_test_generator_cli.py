@@ -22,7 +22,12 @@ logger = logging.getLogger("qa-test-gen")
 
 
 def get_git_diff(base_branch: str = "origin/main") -> str:
-    """Extracts the git diff between HEAD and the target base branch."""
+    """Extracts the git diff between HEAD and the target base branch.
+
+    Raises:
+        RuntimeError: If no diff can be obtained. Returning an empty string instead
+            would cache a baseline plan under the real commit SHA.
+    """
     try:
         result = subprocess.run(
             ["git", "diff", f"{base_branch}...HEAD"],
@@ -39,17 +44,24 @@ def get_git_diff(base_branch: str = "origin/main") -> str:
                 text=True,
                 timeout=30,
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Fallback git diff failed (exit {result.returncode}): {result.stderr.strip()}"
+                )
         return result.stdout
-    except subprocess.TimeoutExpired:
-        logger.error("git diff command timed out after 30 seconds.")
-        return ""
-    except FileNotFoundError:
-        logger.error("git binary not found. Ensure git is installed and on PATH.")
-        return ""
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("git diff command timed out after 30 seconds.") from e
+    except FileNotFoundError as e:
+        raise RuntimeError("git binary not found. Ensure git is installed and on PATH.") from e
 
 
 def get_commit_sha() -> str:
-    """Returns the current HEAD commit SHA."""
+    """Returns the current HEAD commit SHA.
+
+    Raises:
+        RuntimeError: If HEAD cannot be resolved. A placeholder SHA would make
+            unrelated runs share one cache entry.
+    """
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -57,9 +69,13 @@ def get_commit_sha() -> str:
             text=True,
             timeout=5,
         )
-        return result.stdout.strip() if result.returncode == 0 else "unknown"
-    except Exception:
-        return "unknown"
+    except (subprocess.TimeoutExpired, OSError) as e:
+        raise RuntimeError("Unable to resolve the HEAD commit SHA.") from e
+
+    commit_sha = result.stdout.strip()
+    if result.returncode != 0 or not commit_sha:
+        raise RuntimeError(f"Unable to resolve the HEAD commit SHA: {result.stderr.strip()}")
+    return commit_sha
 
 
 def main():
@@ -98,7 +114,11 @@ def main():
     from automation.core import get_diff_test_generator_service
 
     service = get_diff_test_generator_service()
-    commit_sha = args.commit_sha or get_commit_sha()
+    try:
+        commit_sha = args.commit_sha or get_commit_sha()
+    except RuntimeError as e:
+        logger.error(f"{e} Pass --commit-sha explicitly.")
+        return 1
 
     logger.info(f"Commit SHA: {commit_sha[:12]}")
     logger.info(f"Base branch: {args.base_branch}")
@@ -115,7 +135,11 @@ def main():
     else:
         # Step 2: Get diff and generate
         logger.info(f"Cache MISS for SHA {commit_sha[:12]}. Generating new test plan...")
-        diff = get_git_diff(args.base_branch)
+        try:
+            diff = get_git_diff(args.base_branch)
+        except RuntimeError as e:
+            logger.error(f"{e} Not generating or caching a test plan.")
+            return 1
 
         if not diff.strip():
             logger.warning("Empty diff detected. Generating baseline smoke test plan.")

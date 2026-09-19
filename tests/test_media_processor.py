@@ -153,6 +153,13 @@ class TestGifGenerationTwoPass:
             assert "fps=15" in pass1_cmd
             assert "800" in pass1_cmd
 
+            # "-t" must precede the video input in both passes so it trims the video
+            for call in mock_run.call_args_list[:2]:
+                args = call[0][0]
+                t_index = args.index("-t")
+                assert args[t_index + 1] == "10"
+                assert t_index < args.index("-i")
+
     @patch.object(FFmpegMediaProcessorService, "is_ffmpeg_available", return_value=True)
     def test_gif_missing_input_raises_error(self, mock_available):
         """Missing input file should raise FileNotFoundError."""
@@ -271,8 +278,41 @@ class TestFullProcessPipeline:
                     )
                     result = service.process(input_file, tmp_dir)
 
-            assert result.success is True
+            # Partial output is kept, but the pipeline as a whole did not succeed
+            assert result.success is False
             assert result.compressed_video is None
             assert result.preview_gif is not None
             assert result.error_message is not None
             assert "compression failed" in result.error_message.lower()
+
+    @patch.object(FFmpegMediaProcessorService, "is_ffmpeg_available", return_value=True)
+    def test_process_forwards_options(self, mock_available):
+        """CRF and GIF options passed to process() reach both stages."""
+        service = FFmpegMediaProcessorService()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            input_file = os.path.join(tmp_dir, "recording.webm")
+            with open(input_file, "wb") as f:
+                f.write(b"fake video data")
+            # process() only feeds the compressed file to the GIF stage if it exists
+            with open(os.path.join(tmp_dir, "recording_compressed.mp4"), "wb") as f:
+                f.write(b"fake compressed data")
+
+            with patch.object(service, "compress_video") as mock_compress, \
+                    patch.object(service, "generate_preview_gif") as mock_gif:
+                mock_compress.return_value = MediaArtifact(
+                    source_path=input_file,
+                    output_path=input_file,
+                    artifact_type="compressed_video",
+                )
+                mock_gif.return_value = MediaArtifact(
+                    source_path=input_file,
+                    output_path=input_file,
+                    artifact_type="preview_gif",
+                )
+                service.process(
+                    input_file, tmp_dir, crf=35, gif_duration_seconds=4, gif_fps=5, gif_width=320
+                )
+
+            assert mock_compress.call_args.kwargs["crf"] == 35
+            assert mock_gif.call_args.kwargs == {"duration_seconds": 4, "fps": 5, "width": 320}

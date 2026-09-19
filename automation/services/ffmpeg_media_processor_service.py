@@ -194,11 +194,12 @@ class FFmpegMediaProcessorService(IMediaProcessorService):
 
         try:
             # Pass 1: Generate optimized color palette
+            # "-t" goes before "-i" so it trims the video input, not an output or the palette input
             self._run_ffmpeg(
                 [
                     "-y",
-                    "-i", str(in_p),
                     "-t", str(duration_seconds),
+                    "-i", str(in_p),
                     "-vf", f"fps={fps},scale={width}:-1:flags=lanczos,palettegen",
                     str(palette_path),
                 ],
@@ -209,8 +210,8 @@ class FFmpegMediaProcessorService(IMediaProcessorService):
             self._run_ffmpeg(
                 [
                     "-y",
-                    "-i", str(in_p),
                     "-t", str(duration_seconds),
+                    "-i", str(in_p),
                     "-i", str(palette_path),
                     "-filter_complex",
                     f"fps={fps},scale={width}:-1:flags=lanczos[x];[x][1:v]paletteuse",
@@ -253,13 +254,18 @@ class FFmpegMediaProcessorService(IMediaProcessorService):
         self,
         raw_video_path: str,
         output_dir: str,
+        crf: int = 28,
+        gif_duration_seconds: int = 8,
+        gif_fps: int = 10,
+        gif_width: int = 640,
     ) -> MediaProcessingResult:
         """Full media processing pipeline: compress video then generate preview GIF.
 
         If compression succeeds, uses the compressed MP4 as input for GIF generation
         (smaller file = faster GIF processing).
 
-        Returns a result even on partial failure — e.g., video compresses but GIF fails.
+        Returns a result even on partial failure — e.g., video compresses but GIF fails —
+        with any artifact that was produced, but success is True only when both succeed.
         """
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -276,7 +282,7 @@ class FFmpegMediaProcessorService(IMediaProcessorService):
 
         # Step 1: Compress video
         try:
-            compressed_video = self.compress_video(raw_video_path, compressed_path)
+            compressed_video = self.compress_video(raw_video_path, compressed_path, crf=crf)
         except Exception as e:
             error_msg = f"Video compression failed: {e}"
             logger.error(error_msg)
@@ -287,7 +293,13 @@ class FFmpegMediaProcessorService(IMediaProcessorService):
         try:
             # Verify input exists before attempting GIF generation
             if Path(gif_input).is_file():
-                preview_gif = self.generate_preview_gif(gif_input, gif_path)
+                preview_gif = self.generate_preview_gif(
+                    gif_input,
+                    gif_path,
+                    duration_seconds=gif_duration_seconds,
+                    fps=gif_fps,
+                    width=gif_width,
+                )
             else:
                 error_msg = f"GIF input not available: {gif_input}"
                 logger.error(error_msg)
@@ -297,7 +309,7 @@ class FFmpegMediaProcessorService(IMediaProcessorService):
             logger.error(error_msg)
             errors.append(error_msg)
 
-        success = compressed_video is not None or preview_gif is not None
+        success = compressed_video is not None and preview_gif is not None
         error_message = "; ".join(errors) if errors else None
 
         return MediaProcessingResult(

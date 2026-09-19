@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ActionType(str, Enum):
@@ -22,6 +22,9 @@ class AssertionType(str, Enum):
     ELEMENT_EXISTS = "element_exists"
     ALERT_MESSAGE = "alert_message"
     STATE_UPDATE = "state_update"
+    # Raw CSS selector for deterministic, internally built plans. Not offered to Gemini,
+    # which must use accessible text/labels instead.
+    CSS_SELECTOR = "css_selector"
 
 
 class TestAssertion(BaseModel):
@@ -36,9 +39,23 @@ class TestAction(BaseModel):
     """A single user interaction step in a test journey."""
     __test__ = False
     action_type: ActionType = Field(..., description="Type of user interaction")
-    target: str = Field(..., description="Role-based selector, URL path, or element identifier")
+    target: str = Field(
+        ...,
+        description="Role-based selector, URL path, or element identifier. For WAIT: text to wait for, or empty",
+    )
     value: Optional[str] = Field(default=None, description="Input value for fill/select actions")
+    duration_ms: Optional[int] = Field(default=None, ge=0, description="Fixed wait duration for WAIT actions")
     description: str = Field(..., description="Human-readable step description")
+
+    @model_validator(mode="after")
+    def _validate_action_fields(self) -> "TestAction":
+        if self.action_type in (ActionType.FILL, ActionType.SELECT) and self.value is None:
+            raise ValueError(f"{self.action_type.value} action requires a value")
+        # Older plans encoded WAIT durations as a numeric target, e.g. target="2000".
+        if self.action_type == ActionType.WAIT and self.duration_ms is None and self.target.isdigit():
+            self.duration_ms = int(self.target)
+            self.target = ""
+        return self
 
 
 class TestJourney(BaseModel):
