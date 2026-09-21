@@ -27,9 +27,14 @@ dist/
 build/
 *.egg-info/
 workspace_target/
+.qa-cache/
 graphify-out/
 brag-output*/
 
 # Local-only Antigravity Skills (preserving .agents/rules/antigravity-instructions.md)
 .agents/skills/
 skills-lock.json
+
+# Local-only Claude Code setup (symlinks into .agents/skills/)
+.claude/skills/
+CLAUDE.md
