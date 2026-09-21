@@ -20,6 +20,7 @@ from automation.domain.test_plan import (
 )
 from automation.services.gemini_diff_test_generator_service import (
     GeminiDiffTestGeneratorService,
+    MAX_CACHE_ENTRIES,
     MAX_DIFF_CHARS,
     MAX_JOURNEYS,
 )
@@ -206,7 +207,7 @@ class TestGenerateFromBackendOnlyDiff:
 # --- Test: Cache hit skips Gemini ---
 
 class TestCacheHitSkipsGemini:
-    """Re-running on the same commit SHA reads from cache without LLM invocation."""
+    """Re-running on the same diff reads from cache without LLM invocation."""
 
     def test_cache_hit_returns_cached_plan(self):
         service = _make_service()
@@ -226,16 +227,18 @@ class TestCacheHitSkipsGemini:
             ],
         )
 
+        key = service.cache_key(SAMPLE_UI_DIFF)
+
         with tempfile.TemporaryDirectory() as cache_dir:
             # Save to cache
-            service.save_cached_plan(cached_plan, cache_dir)
+            service.save_cached_plan(cached_plan, key, cache_dir)
 
             # Verify cache file exists
-            cache_file = Path(cache_dir) / "cached-sha-111.json"
+            cache_file = Path(cache_dir) / f"{key}.json"
             assert cache_file.is_file()
 
             # Load from cache
-            loaded = service.load_cached_plan("cached-sha-111", cache_dir)
+            loaded = service.load_cached_plan(key, cache_dir)
             assert loaded is not None
             assert loaded.commit_sha == "cached-sha-111"
             assert loaded.source == "gemini"
@@ -246,14 +249,93 @@ class TestCacheHitSkipsGemini:
 # --- Test: Cache miss calls Gemini ---
 
 class TestCacheMissCallsGemini:
-    """New commit SHA triggers fresh Gemini call."""
+    """A key with no cache entry triggers a fresh Gemini call."""
 
     def test_cache_miss_returns_none(self):
         service = _make_service()
 
         with tempfile.TemporaryDirectory() as cache_dir:
-            loaded = service.load_cached_plan("nonexistent-sha", cache_dir)
+            loaded = service.load_cached_plan("nonexistent-key", cache_dir)
             assert loaded is None
+
+
+# --- Test: Cache keying and pruning ---
+
+class TestCacheKey:
+    """The key covers every input the generated plan depends on."""
+
+    def test_same_diff_gives_same_key(self):
+        service = _make_service()
+
+        assert service.cache_key(SAMPLE_UI_DIFF) == service.cache_key(SAMPLE_UI_DIFF)
+
+    def test_different_diff_gives_different_key(self):
+        """A moved base branch changes the diff, so the cached plan must not be reused."""
+        service = _make_service()
+
+        assert service.cache_key(SAMPLE_UI_DIFF) != service.cache_key(SAMPLE_BACKEND_ONLY_DIFF)
+
+    def test_context_changes_key(self):
+        service = _make_service()
+
+        assert service.cache_key(SAMPLE_UI_DIFF) != service.cache_key(SAMPLE_UI_DIFF, "LoginForm")
+
+    def test_model_changes_key(self):
+        """flash-lite and pro produce different plans, so they must not share entries."""
+        flash = GeminiDiffTestGeneratorService(api_key="k", gemini_model="gemini-2.0-flash")
+        pro = GeminiDiffTestGeneratorService(api_key="k", gemini_model="gemini-2.5-pro")
+
+        assert flash.cache_key(SAMPLE_UI_DIFF) != pro.cache_key(SAMPLE_UI_DIFF)
+
+    def test_prompt_version_changes_key(self):
+        service = _make_service()
+        before = service.cache_key(SAMPLE_UI_DIFF)
+
+        with patch(
+            "automation.services.gemini_diff_test_generator_service.PROMPT_VERSION", "99"
+        ):
+            assert service.cache_key(SAMPLE_UI_DIFF) != before
+
+    def test_key_is_filesystem_safe(self):
+        service = _make_service()
+
+        key = service.cache_key("diff with /slashes and ..dots")
+
+        assert key.isalnum()
+        assert len(key) == 32
+
+
+class TestCachePruning:
+    """The cache is bounded so it cannot grow one file per run forever."""
+
+    def test_oldest_entries_are_pruned(self):
+        service = _make_service()
+        plan = TestPlan(commit_sha="sha", source="gemini", raw_diff_summary="p")
+
+        with tempfile.TemporaryDirectory() as cache_dir:
+            for i in range(MAX_CACHE_ENTRIES + 5):
+                service.save_cached_plan(plan, f"key{i:04d}", cache_dir)
+                # Keep mtimes strictly ordered for a deterministic prune order
+                os.utime(Path(cache_dir) / f"key{i:04d}.json", (i, i))
+
+            remaining = sorted(p.stem for p in Path(cache_dir).glob("*.json"))
+
+        assert len(remaining) == MAX_CACHE_ENTRIES
+        assert remaining[0] == "key0005"  # The five oldest were removed
+
+    def test_recently_used_entry_survives(self):
+        service = _make_service()
+        plan = TestPlan(commit_sha="sha", source="gemini", raw_diff_summary="p")
+
+        with tempfile.TemporaryDirectory() as cache_dir:
+            service.save_cached_plan(plan, "keep-me", cache_dir)
+            os.utime(Path(cache_dir) / "keep-me.json", (10_000_000_000, 10_000_000_000))
+
+            for i in range(MAX_CACHE_ENTRIES + 5):
+                service.save_cached_plan(plan, f"key{i:04d}", cache_dir)
+                os.utime(Path(cache_dir) / f"key{i:04d}.json", (i, i))
+
+            assert (Path(cache_dir) / "keep-me.json").is_file()
 
 
 # --- Test: Gemini failure triggers fallback ---
@@ -483,3 +565,77 @@ class TestCliGitHelpers:
             assert qa_test_generator_cli.main() == 1
 
         mock_factory.return_value.save_cached_plan.assert_not_called()
+
+    @patch("automation.core.get_diff_test_generator_service")
+    def test_main_keys_cache_on_diff_not_commit(self, mock_factory):
+        """The CLI must look the cache up by diff content, not by commit SHA."""
+        from automation import qa_test_generator_cli
+
+        service = mock_factory.return_value
+        service.cache_key.return_value = "diff-key"
+        service.load_cached_plan.return_value = TestPlan(
+            commit_sha="older-sha", source="gemini", raw_diff_summary="cached"
+        )
+
+        with patch.object(qa_test_generator_cli, "get_commit_sha", return_value="head-sha"), \
+                patch.object(qa_test_generator_cli, "get_git_diff", return_value=SAMPLE_UI_DIFF), \
+                patch("sys.argv", ["qa-test-gen"]):
+            assert qa_test_generator_cli.main() == 0
+
+        service.cache_key.assert_called_once_with(SAMPLE_UI_DIFF, "")
+        assert service.load_cached_plan.call_args.args[0] == "diff-key"
+        service.generate_test_plan.assert_not_called()
+
+
+# --- Test: Degraded plans are not cached ---
+
+class TestDegradedPlans:
+    """A fallback caused by an error must not be pinned to these changes."""
+
+    def test_api_error_fallback_is_degraded(self):
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = RuntimeError("API down")
+        service = _make_service(mock_client)
+
+        plan = service.generate_test_plan(diff=SAMPLE_UI_DIFF, commit_sha="err-sha")
+
+        assert plan.source == "fallback_baseline"
+        assert plan.degraded is True
+
+    def test_invalid_json_fallback_is_degraded(self):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "not json at all"
+        mock_client.models.generate_content.return_value = mock_response
+        service = _make_service(mock_client)
+
+        plan = service.generate_test_plan(diff=SAMPLE_UI_DIFF, commit_sha="bad-json-sha")
+
+        assert plan.degraded is True
+
+    def test_no_ui_changes_fallback_is_not_degraded(self):
+        """A genuine "nothing to test" answer is a real result and stays cacheable."""
+        service = _make_service(_make_mock_client(SAMPLE_GEMINI_NO_UI_RESPONSE))
+
+        plan = service.generate_test_plan(diff=SAMPLE_BACKEND_ONLY_DIFF, commit_sha="backend-sha")
+
+        assert plan.source == "fallback_baseline"
+        assert plan.degraded is False
+
+    @patch("automation.core.get_diff_test_generator_service")
+    def test_main_does_not_cache_degraded_plan(self, mock_factory):
+        from automation import qa_test_generator_cli
+
+        service = mock_factory.return_value
+        service.cache_key.return_value = "some-key"
+        service.load_cached_plan.return_value = None
+        service.generate_test_plan.return_value = TestPlan(
+            commit_sha="sha", source="fallback_baseline", raw_diff_summary="Gemini API error", degraded=True
+        )
+
+        with patch.object(qa_test_generator_cli, "get_commit_sha", return_value="sha"), \
+                patch.object(qa_test_generator_cli, "get_git_diff", return_value=SAMPLE_UI_DIFF), \
+                patch("sys.argv", ["qa-test-gen"]):
+            assert qa_test_generator_cli.main() == 0
+
+        service.save_cached_plan.assert_not_called()

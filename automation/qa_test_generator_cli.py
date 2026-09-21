@@ -96,7 +96,7 @@ def main():
     parser.add_argument(
         "--cache-dir",
         default=".qa-cache/test-plans",
-        help="Directory for caching generated test plans (default: .qa-cache/test-plans).",
+        help="Directory for caching generated test plans, keyed by diff content (default: .qa-cache/test-plans).",
     )
     parser.add_argument(
         "--output",
@@ -124,34 +124,45 @@ def main():
     logger.info(f"Base branch: {args.base_branch}")
     logger.info(f"Cache directory: {args.cache_dir}")
 
-    # Step 1: Check cache
-    cached_plan = service.load_cached_plan(commit_sha, args.cache_dir)
+    # Step 1: Get the diff. The cache is keyed on it, not on the commit SHA, so a
+    # moved base branch cannot serve a plan generated from different changes.
+    try:
+        diff = get_git_diff(args.base_branch)
+    except RuntimeError as e:
+        logger.error(f"{e} Not generating or caching a test plan.")
+        return 1
+
+    if not diff.strip():
+        logger.warning("Empty diff detected. Generating baseline smoke test plan.")
+
+    cache_key = service.cache_key(diff, args.context)
+
+    # Step 2: Check cache
+    cached_plan = service.load_cached_plan(cache_key, args.cache_dir)
     if cached_plan is not None:
         logger.info(
-            f"✅ Cache HIT for SHA {commit_sha[:12]}. "
+            f"✅ Cache HIT for key {cache_key[:12]}. "
             f"Reusing cached plan ({cached_plan.source}, {len(cached_plan.journeys)} journeys)."
         )
         plan = cached_plan
     else:
-        # Step 2: Get diff and generate
-        logger.info(f"Cache MISS for SHA {commit_sha[:12]}. Generating new test plan...")
-        try:
-            diff = get_git_diff(args.base_branch)
-        except RuntimeError as e:
-            logger.error(f"{e} Not generating or caching a test plan.")
-            return 1
-
-        if not diff.strip():
-            logger.warning("Empty diff detected. Generating baseline smoke test plan.")
-
+        # Step 3: Generate
+        logger.info(f"Cache MISS for key {cache_key[:12]}. Generating new test plan...")
         plan = service.generate_test_plan(
             diff=diff,
             commit_sha=commit_sha,
             component_context=args.context,
         )
 
-        # Step 3: Cache the result
-        service.save_cached_plan(plan, args.cache_dir)
+        # Step 4: Cache the result, unless generation degraded to a fallback.
+        # Caching those would pin a smoke test to these changes even after the
+        # cause (missing key, API outage, bad response) is fixed.
+        if plan.degraded:
+            logger.warning(
+                f"⚠️  Plan degraded to a baseline fallback, not caching: {plan.raw_diff_summary}"
+            )
+        else:
+            service.save_cached_plan(plan, cache_key, args.cache_dir)
 
     # Step 4: Output
     plan_json = plan.model_dump_json(indent=2)
