@@ -1,5 +1,6 @@
 """Unit tests for MaestroTestRunnerService."""
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -319,3 +320,44 @@ class TestMaestroExecution:
 
         videos = [c.args[0][c.args[0].index("--record") + 1] for c in mock_run.call_args_list]
         assert len(set(videos)) == 2
+
+
+class TestUnsupportedAssertions:
+    """CSS assertions cannot be expressed natively, so their loss must be visible."""
+
+    def _css_plan(self) -> TestPlan:
+        return TestPlan(
+            commit_sha="css-sha",
+            source="fallback_baseline",
+            journeys=[
+                TestJourney(
+                    name="Baseline smoke test",
+                    entry_route="/",
+                    assertions=[
+                        TestAssertion(type=AssertionType.CSS_SELECTOR, target="body", description="Body"),
+                    ],
+                ),
+            ],
+        )
+
+    def test_css_assertion_is_dropped_with_a_warning(self, caplog):
+        service = MaestroTestRunnerService(app_id="com.test.app")
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            with caplog.at_level(logging.WARNING):
+                service.generate_test_script(self._css_plan(), output_dir)
+            content = Path(os.path.join(output_dir, "flow_journey_0.yaml")).read_text()
+
+        assert "assertVisible" not in content
+        messages = " ".join(r.message for r in caplog.records)
+        assert "no native Maestro equivalent" in messages
+        assert "only that the app launches" in messages
+
+    def test_supported_assertions_do_not_warn(self, caplog):
+        service = MaestroTestRunnerService(app_id="com.test.app")
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            with caplog.at_level(logging.WARNING):
+                service.generate_test_script(_make_plan(), output_dir)
+
+        assert not [r for r in caplog.records if "dropping" in r.message]

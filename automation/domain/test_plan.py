@@ -44,7 +44,11 @@ class TestAction(BaseModel):
         description="Role-based selector, URL path, or element identifier. For WAIT: text to wait for, or empty",
     )
     value: Optional[str] = Field(default=None, description="Input value for fill/select actions")
-    duration_ms: Optional[int] = Field(default=None, ge=0, description="Fixed wait duration for WAIT actions")
+    duration_ms: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="For WAIT: how long to wait for target, or a fixed wait when target is empty",
+    )
     description: str = Field(..., description="Human-readable step description")
 
     @model_validator(mode="after")

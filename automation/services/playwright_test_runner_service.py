@@ -71,10 +71,15 @@ class PlaywrightTestRunnerService(ITestRunnerService):
                     elif action.action_type == ActionType.SELECT:
                         f.write(f'        page.get_by_label({target}).select_option({value})\n')
                     elif action.action_type == ActionType.WAIT:
-                        if action.duration_ms is not None:
+                        # target = what to wait for, duration_ms = its timeout;
+                        # duration_ms alone is a fixed wait
+                        if action.target:
+                            timeout = f"timeout={action.duration_ms}" if action.duration_ms else ""
+                            f.write(
+                                f'        expect(page.get_by_text({target}).first).to_be_visible({timeout})\n'
+                            )
+                        elif action.duration_ms is not None:
                             f.write(f'        page.wait_for_timeout({action.duration_ms})\n')
-                        elif action.target:
-                            f.write(f'        expect(page.get_by_text({target}).first).to_be_visible()\n')
                         else:
                             f.write('        page.wait_for_load_state()\n')
 
@@ -165,10 +170,12 @@ class PlaywrightTestRunnerService(ITestRunnerService):
                             elif action.action_type == ActionType.SELECT:
                                 page.get_by_label(action.target).select_option(action.value, timeout=config.timeout_ms)
                             elif action.action_type == ActionType.WAIT:
-                                if action.duration_ms is not None:
+                                if action.target:
+                                    expect(page.get_by_text(action.target).first).to_be_visible(
+                                        timeout=action.duration_ms or config.timeout_ms
+                                    )
+                                elif action.duration_ms is not None:
                                     page.wait_for_timeout(action.duration_ms)
-                                elif action.target:
-                                    expect(page.get_by_text(action.target).first).to_be_visible(timeout=config.timeout_ms)
                                 else:
                                     page.wait_for_load_state(timeout=config.timeout_ms)
 

@@ -53,7 +53,8 @@ Rules for test journeys:
 - Use accessible selectors: role-based (button, link, textbox, heading) and visible text. NEVER use CSS selectors or test IDs.
 - Actions should be realistic user interactions: navigate, click, fill, scroll, select, wait.
 - fill and select actions MUST include a value.
-- wait actions either set target to the visible text to wait for, or leave target empty and set duration_ms.
+- wait actions set target to the visible text to wait for, optionally with duration_ms as its timeout,
+  or leave target empty and set duration_ms for a fixed wait.
 - Assertions should verify VISIBLE outcomes: text appears, elements exist, alerts show, state updates.
 - Keep journeys focused and concise (3-8 actions each).
 - Maximum 5 journeys per plan.

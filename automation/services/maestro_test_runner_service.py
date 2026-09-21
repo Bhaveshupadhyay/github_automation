@@ -95,8 +95,9 @@ class MaestroTestRunnerService(ITestRunnerService):
                     else:
                         lines.append("- waitForAnimationToEnd")
 
+            dropped = 0
             for assertion in journey.assertions:
-                # CSS selectors have no meaning in a native app, so they are skipped
+                # CSS selectors have no meaning in a native app
                 if assertion.type in (
                     AssertionType.VISIBLE_TEXT,
                     AssertionType.ELEMENT_EXISTS,
@@ -104,6 +105,18 @@ class MaestroTestRunnerService(ITestRunnerService):
                     AssertionType.STATE_UPDATE,
                 ):
                     lines.append(f"- assertVisible: {q(assertion.target)}")
+                else:
+                    dropped += 1
+                    logger.warning(
+                        f"Journey '{journey.name}': dropping {assertion.type.value} assertion "
+                        f"{assertion.target!r}, which has no native Maestro equivalent."
+                    )
+
+            if dropped and dropped == len(journey.assertions):
+                logger.warning(
+                    f"Journey '{journey.name}' has no assertion Maestro can express. "
+                    "The flow verifies only that the app launches and the steps run."
+                )
 
             flow_path.write_text("\n".join(lines), encoding="utf-8")
 

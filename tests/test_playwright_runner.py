@@ -281,3 +281,41 @@ class TestExecute:
         assert result.failed == 1
         assert result.test_results[0].outcome == TestOutcome.PASSED
         assert "browser crashed" in result.test_results[1].failure_message
+
+
+class TestWaitContract:
+    """target = what to wait for, duration_ms = its timeout; duration alone is a fixed wait."""
+
+    def _plan_with_wait(self, **wait_kwargs) -> TestPlan:
+        return TestPlan(
+            commit_sha="wait-sha",
+            source="gemini",
+            journeys=[
+                TestJourney(
+                    name="Wait",
+                    entry_route="/",
+                    actions=[TestAction(action_type=ActionType.WAIT, description="Wait", **wait_kwargs)],
+                ),
+            ],
+        )
+
+    def _script_for(self, plan: TestPlan) -> str:
+        with tempfile.TemporaryDirectory() as output_dir:
+            PlaywrightTestRunnerService().generate_test_script(plan, output_dir)
+            return open(os.path.join(output_dir, "test_journey_0.py")).read()
+
+    def test_target_with_duration_uses_it_as_timeout(self):
+        script = self._script_for(self._plan_with_wait(target="Saved", duration_ms=5000))
+
+        assert "expect(page.get_by_text('Saved').first).to_be_visible(timeout=5000)" in script
+        assert "wait_for_timeout" not in script
+
+    def test_duration_only_is_a_fixed_wait(self):
+        script = self._script_for(self._plan_with_wait(target="", duration_ms=5000))
+
+        assert "page.wait_for_timeout(5000)" in script
+
+    def test_target_only_waits_without_explicit_timeout(self):
+        script = self._script_for(self._plan_with_wait(target="Saved"))
+
+        assert "expect(page.get_by_text('Saved').first).to_be_visible()" in script

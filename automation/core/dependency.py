@@ -254,7 +254,11 @@ def get_test_runner_service(
     """
     if runner_type == "maestro":
         return MaestroTestRunnerService(maestro_binary=maestro_binary, app_id=app_id)
-    return PlaywrightTestRunnerService()
+    if runner_type == "playwright":
+        return PlaywrightTestRunnerService()
+    raise ValueError(
+        f"Unsupported test runner type: {runner_type!r}. Expected 'playwright' or 'maestro'."
+    )
 
 
 def get_media_processor_service(
