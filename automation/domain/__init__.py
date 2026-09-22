@@ -43,6 +43,25 @@ from automation.domain.schema_detection import (
     DockerServiceDefinition,
     SchemaDetectionResult,
 )
+from automation.domain.test_plan import (
+    ActionType,
+    AssertionType,
+    TestAssertion,
+    TestAction,
+    TestJourney,
+    TestPlan,
+    DiffAnalysisResult,
+)
+from automation.domain.test_run import (
+    TestOutcome,
+    TestRunConfig,
+    TestCaseResult,
+    TestRunResult,
+)
+from automation.domain.media_processing import (
+    MediaArtifact,
+    MediaProcessingResult,
+)
 
 __all__ = [
     "DEFAULT_GEMINI_MODEL",
@@ -85,4 +104,17 @@ __all__ = [
     "DetectedDatabase",
     "DockerServiceDefinition",
     "SchemaDetectionResult",
+    "ActionType",
+    "AssertionType",
+    "TestAssertion",
+    "TestAction",
+    "TestJourney",
+    "TestPlan",
+    "DiffAnalysisResult",
+    "TestOutcome",
+    "TestRunConfig",
+    "TestCaseResult",
+    "TestRunResult",
+    "MediaArtifact",
+    "MediaProcessingResult",
 ]

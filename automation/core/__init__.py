@@ -23,6 +23,9 @@ from automation.core.dependency import (
     get_lifecycle_supervisor,
     get_schema_detector_service,
     get_wireguard_service,
+    get_diff_test_generator_service,
+    get_test_runner_service,
+    get_media_processor_service,
 )
 
 __all__ = [
@@ -50,5 +53,8 @@ __all__ = [
     "get_lifecycle_supervisor",
     "get_schema_detector_service",
     "get_wireguard_service",
+    "get_diff_test_generator_service",
+    "get_test_runner_service",
+    "get_media_processor_service",
 ]
 

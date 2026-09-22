@@ -1,0 +1,19 @@
+diff --git a/api/routes/users.py b/api/routes/users.py
+index aaa1111..bbb2222 100644
+--- a/api/routes/users.py
++++ b/api/routes/users.py
+@@ -10,3 +10,8 @@ def get_user(user_id: int):
+     return db.query(User).filter(User.id == user_id).first()
++
++def update_user_cache(user_id: int):
++    """Invalidate user cache entry after profile update."""
++    cache.invalidate(f"user:{user_id}")
++    return {"status": "ok"}
+diff --git a/api/models/user.py b/api/models/user.py
+index ccc3333..ddd4444 100644
+--- a/api/models/user.py
++++ b/api/models/user.py
+@@ -8,3 +8,4 @@ class User(Base):
+     email = Column(String, unique=True, index=True)
+     hashed_password = Column(String)
++    cache_key = Column(String, nullable=True)

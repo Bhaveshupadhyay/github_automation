@@ -25,6 +25,9 @@ from automation.interfaces import (
     IProcessTreeManager,
     ISchemaDetectorService,
     IWireGuardService,
+    IDiffTestGeneratorService,
+    ITestRunnerService,
+    IMediaProcessorService,
 )
 
 from automation.domain import (
@@ -60,6 +63,10 @@ from automation.services.process_tree_manager import ProcessTreeManager
 from automation.services.lifecycle_supervisor_service import LifecycleSupervisorService
 from automation.services.schema_detection_service import SchemaDetectionService
 from automation.services.wireguard_service import WireGuardService
+from automation.services.gemini_diff_test_generator_service import GeminiDiffTestGeneratorService
+from automation.services.playwright_test_runner_service import PlaywrightTestRunnerService
+from automation.services.maestro_test_runner_service import MaestroTestRunnerService
+from automation.services.ffmpeg_media_processor_service import FFmpegMediaProcessorService
 
 
 @lru_cache(maxsize=1)
@@ -218,3 +225,44 @@ def get_lifecycle_supervisor(
 def get_schema_detector_service() -> ISchemaDetectorService:
     """Returns ISchemaDetectorService implementation."""
     return SchemaDetectionService()
+
+
+def get_diff_test_generator_service(
+    api_key: Optional[str] = None,
+    gemini_model: Optional[str] = None,
+    genai_client: Optional[object] = None,
+) -> IDiffTestGeneratorService:
+    """Returns IDiffTestGeneratorService implementation (Gemini-powered)."""
+    return GeminiDiffTestGeneratorService(
+        api_key=api_key,
+        gemini_model=gemini_model,
+        genai_client=genai_client,
+    )
+
+
+def get_test_runner_service(
+    runner_type: str = "playwright",
+    maestro_binary: Optional[str] = None,
+    app_id: Optional[str] = None,
+) -> ITestRunnerService:
+    """Returns ITestRunnerService implementation.
+
+    Args:
+        runner_type: 'playwright' for web testing or 'maestro' for mobile testing.
+        maestro_binary: Optional path to the Maestro CLI binary.
+        app_id: Mobile application ID used by Maestro flows (overridable per run via TestRunConfig.app_id).
+    """
+    if runner_type == "maestro":
+        return MaestroTestRunnerService(maestro_binary=maestro_binary, app_id=app_id)
+    if runner_type == "playwright":
+        return PlaywrightTestRunnerService()
+    raise ValueError(
+        f"Unsupported test runner type: {runner_type!r}. Expected 'playwright' or 'maestro'."
+    )
+
+
+def get_media_processor_service(
+    ffmpeg_binary: Optional[str] = None,
+) -> IMediaProcessorService:
+    """Returns IMediaProcessorService implementation (FFmpeg-based)."""
+    return FFmpegMediaProcessorService(ffmpeg_binary=ffmpeg_binary)

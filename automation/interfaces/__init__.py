@@ -20,6 +20,9 @@ from automation.interfaces.lifecycle_interface import ILifecycleSupervisor
 from automation.interfaces.process_tree_interface import IProcessTreeManager
 from automation.interfaces.schema_detector_interface import ISchemaDetectorService
 from automation.interfaces.wireguard_interface import IWireGuardService
+from automation.interfaces.diff_test_generator_interface import IDiffTestGeneratorService
+from automation.interfaces.test_runner_interface import ITestRunnerService
+from automation.interfaces.media_processor_interface import IMediaProcessorService
 
 __all__ = [
     "ICodeDevelopmentService",
@@ -43,5 +46,8 @@ __all__ = [
     "IProcessTreeManager",
     "ISchemaDetectorService",
     "IWireGuardService",
+    "IDiffTestGeneratorService",
+    "ITestRunnerService",
+    "IMediaProcessorService",
 ]
 
