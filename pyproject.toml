@@ -34,7 +34,10 @@ github-automation = "automation.main:main"
 github-automation-ai = "automation.main:main"
 qa-contract = "automation.qa_contract_cli:main"
 secret-drift = "automation.secret_drift_cli:main"
+qa-branch-resolve = "automation.branch_resolver_cli:main"
+qa-lifecycle = "automation.lifecycle_supervisor_cli:main"
 qa-test-gen = "automation.qa_test_generator_cli:main"
+qa-run = "automation.qa_test_runner_cli:main"
 qa-media = "automation.qa_media_processor_cli:main"
 qa-publish = "automation.qa_publish_cli:main"
 
@@ -49,4 +52,7 @@ packages = ["automation"]
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    # Parses the assembled workflows in tests, so the CI guardrails are asserted
+    # against the YAML rather than reviewed by eye.
+    "pyyaml>=6.0",
 ]

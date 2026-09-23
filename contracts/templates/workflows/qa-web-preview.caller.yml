@@ -1,0 +1,39 @@
+# Copy to .github/workflows/qa-web-preview.yml in a frontend repository.
+#
+# Everything the pipeline does lives in the reusable workflow. This file exists only to
+# say when it runs and which backend it is paired with.
+
+name: QA Web Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+# Cancels the run still testing the previous commit as soon as a new one lands. The
+# called workflow declares the same group; both are needed, because a caller that keeps
+# running holds its called workflow alive.
+concurrency:
+  group: qa-web-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  qa:
+    # Pilot gate (Phase 7.1). Delete this condition at general availability to run on
+    # every pull request.
+    if: contains(github.event.pull_request.labels.*.name, 'qa-preview')
+    uses: bhaveshupadhyay/github_automation/.github/workflows/qa-web-preview.yml@main
+    with:
+      backend-repo: your-org/your-backend
+      backend-default-branch: dev
+    secrets:
+      # The only application secret this pipeline needs. Everything else is decrypted
+      # from the .env.qa.enc committed alongside the code.
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      # Only when the backend repository is private and the default token cannot read it.
+      BACKEND_TOKEN: ${{ secrets.BACKEND_TOKEN }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}

@@ -1,0 +1,444 @@
+name: QA Web Preview
+
+# Reusable pipeline: boots a frontend PR against its paired backend branch inside the
+# runner, records the journeys Gemini derived from the diff, and reports the result on
+# the pull request. Consumer repositories call it from a three-line caller workflow;
+# see contracts/templates/workflows/qa-web-preview.caller.yml.
+#
+# It is deliberately `workflow_call` only. A `pull_request` trigger here would run the
+# pipeline against this tooling repository, which has no frontend to preview.
+
+on:
+  workflow_call:
+    inputs:
+      backend-repo:
+        description: "Backend repository as owner/name, paired with the frontend PR."
+        type: string
+        required: true
+      backend-default-branch:
+        description: "Branch used when the PR declares no backend branch and no head matches."
+        type: string
+        required: false
+        default: "dev"
+      tooling-ref:
+        description: "Ref of bhaveshupadhyay/github_automation supplying the qa-* CLIs."
+        type: string
+        required: false
+        default: "main"
+      db-strategy:
+        description: "auto, cloud_dev or ephemeral_container."
+        type: string
+        required: false
+        default: "auto"
+      frontend-url:
+        description: "Address the frontend serves on inside the runner."
+        type: string
+        required: false
+        default: "http://localhost:3000"
+      node-version:
+        description: "Node.js version used to build and serve the frontend."
+        type: string
+        required: false
+        default: "20"
+      python-version:
+        description: "Python version used for the backend and the qa-* CLIs."
+        type: string
+        required: false
+        default: "3.12"
+      startup-timeout-seconds:
+        description: "Budget for dependency install, migrations and both health probes."
+        type: number
+        required: false
+        default: 420
+      timeout-minutes:
+        description: "Hard job timeout. Raise only with evidence from the run durations."
+        type: number
+        required: false
+        default: 15
+    secrets:
+      SOPS_AGE_KEY:
+        description: "The one application secret in GitHub Actions. Decrypts .env.qa.enc."
+        required: true
+      GEMINI_API_KEY:
+        description: "Diff analysis. Absent, test generation falls back to the baseline suite."
+        required: false
+      BACKEND_TOKEN:
+        description: "Read access to the backend repository when it is private."
+        required: false
+      SLACK_BOT_TOKEN:
+        description: "Slack thread reply. Skipped entirely when unset."
+        required: false
+
+# Keyed on the pull request, so a new push cancels the run still testing the old commit.
+# `cancel-in-progress` is a capacity control, not a correctness guarantee: a run already
+# past the cancellation point still finishes, which is why the publisher restores the
+# single-comment invariant on its own (Directive 5.A.4).
+concurrency:
+  group: qa-web-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # A fork PR receives a read-only token and no secrets, so the pipeline cannot run.
+  # It is skipped deliberately and visibly rather than failing with a decryption error.
+  fork-notice:
+    if: github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Explain why no preview was produced
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTICE=$(cat <<'EOF'
+          <!-- qa-preview-bot -->
+          ### ⏭️ QA preview skipped — pull request from a fork
+
+          Secrets are not available to workflows triggered by a fork, so the QA environment
+          cannot be decrypted or started. Nothing is wrong with this pull request.
+
+          A maintainer can produce a preview by re-running this pull request from a branch
+          in this repository.
+          EOF
+          )
+          echo "$NOTICE" >> "$GITHUB_STEP_SUMMARY"
+          # A fork's token is read-only, so this is expected to fail there. It is attempted
+          # anyway because the same job runs for maintainers re-dispatching the workflow.
+          printf '%s' "$NOTICE" | gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file - \
+            || echo "::notice::Could not post the notice; a fork token cannot comment. See the job summary."
+
+  qa-preview:
+    if: ${{ !github.event.pull_request.head.repo.fork }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      FRONTEND_DIR: ${{ github.workspace }}/frontend
+      BACKEND_DIR: ${{ github.workspace }}/backend
+      TOOLING_DIR: ${{ github.workspace }}/tooling
+      RESULTS_DIR: ${{ github.workspace }}/qa-results
+      MEDIA_DIR: ${{ github.workspace }}/qa-media
+      QA_BASE_URL: ${{ inputs.frontend-url }}
+    steps:
+      # 1. Frontend, at the PR head. `fetch-depth: 0` is required: the diff that drives
+      #    test generation is computed against the base branch.
+      - name: Checkout frontend at the pull request head
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: frontend
+
+      - name: Checkout QA tooling
+        uses: actions/checkout@v4
+        with:
+          repository: bhaveshupadhyay/github_automation
+          ref: ${{ inputs.tooling-ref }}
+          path: tooling
+
+      - name: Set up Python and uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "tooling/uv.lock"
+
+      - name: Install QA tooling
+        run: uv sync --project "$TOOLING_DIR" --extra qa
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install SOPS and age
+        run: |
+          set -euo pipefail
+          SOPS_VERSION=v3.9.4
+          curl -fsSL -o /tmp/sops \
+            "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64"
+          sudo install -m 0755 /tmp/sops /usr/local/bin/sops
+          sudo apt-get update -qq && sudo apt-get install -y -qq age
+          sops --version
+
+      # 2. Fail here, before anything is started, when the PR adds a variable to
+      #    .env.example without adding it to .env.qa.enc. The alternative is a service
+      #    that starts, misbehaves, and fails an unrelated assertion minutes later.
+      - name: Check frontend secret drift
+        working-directory: frontend
+        run: |
+          if [ -f .env.example ]; then
+            uv run --project "$TOOLING_DIR" secret-drift
+          else
+            echo "::notice::No .env.example in the frontend repository; drift check skipped."
+          fi
+
+      # 3. Which backend branch belongs to this PR: explicit declaration, then a matching
+      #    remote head, then the default branch.
+      - name: Resolve the backend branch
+        id: backend_branch
+        working-directory: frontend
+        env:
+          GH_TOKEN: ${{ secrets.BACKEND_TOKEN || github.token }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          BACKEND_REPO: ${{ inputs.backend-repo }}
+          DEFAULT_BRANCH: ${{ inputs.backend-default-branch }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR"
+          # The body is written to a file rather than passed as an argument: it is
+          # human-authored text that must not be re-parsed by the shell.
+          printf '%s' "$PR_BODY" > "$RESULTS_DIR/pr-body.txt"
+          uv run --project "$TOOLING_DIR" qa-branch-resolve \
+            --source-branch "$SOURCE_BRANCH" \
+            --backend-repo-url "https://github.com/${BACKEND_REPO}.git" \
+            --pr-body-file "$RESULTS_DIR/pr-body.txt" \
+            --default-branch "$DEFAULT_BRANCH" \
+            --json > "$RESULTS_DIR/branch.json"
+          BRANCH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_branch"])' "$RESULTS_DIR/branch.json")
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "Resolved backend branch: $BRANCH"
+
+      - name: Checkout backend at the resolved branch
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.backend-repo }}
+          ref: ${{ steps.backend_branch.outputs.branch }}
+          token: ${{ secrets.BACKEND_TOKEN || github.token }}
+          path: backend
+
+      - name: Check backend secret drift
+        working-directory: backend
+        run: |
+          if [ -f .env.example ]; then
+            uv run --project "$TOOLING_DIR" secret-drift
+          else
+            echo "::notice::No .env.example in the backend repository; drift check skipped."
+          fi
+
+      # 4. Decrypt once for the steps that run outside the supervisor. The supervisor
+      #    decrypts again for the services themselves and shreds its own copy on exit.
+      #    Only the storage keys are exported, and every value is masked first.
+      - name: Decrypt the QA environment
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SOPS_AGE_KEY:-}" ]; then
+            echo "::error::SOPS_AGE_KEY is not set. It is the one secret this pipeline requires."
+            exit 1
+          fi
+          if [ ! -f backend/.env.qa.enc ]; then
+            echo "::notice::No backend/.env.qa.enc; continuing without decrypted storage credentials."
+            exit 0
+          fi
+          # Written under RUNNER_TEMP, never the workspace, so no later step can upload
+          # or commit it.
+          # The type is stated rather than inferred: SOPS cannot derive dotenv from the
+          # .enc extension, and guesses YAML instead.
+          sops --decrypt --input-type dotenv --output-type dotenv \
+            backend/.env.qa.enc > "$RUNNER_TEMP/qa.env"
+          chmod 600 "$RUNNER_TEMP/qa.env"
+          while IFS='=' read -r key value; do
+            case "$key" in
+              R2_*|AWS_*|SLACK_CHANNEL|SLACK_THREAD|QA_BOT_LOGIN) ;;
+              *) continue ;;
+            esac
+            value="${value%\"}"; value="${value#\"}"
+            [ -n "$value" ] || continue
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$RUNNER_TEMP/qa.env" || true)
+
+      # 5. Database provisioning, both services, and the health probes. Backgrounded so
+      #    the services outlive this step; readiness is a file the supervisor writes only
+      #    after both probes return 200, not a guessed sleep.
+      - name: Start services and await health
+        id: lifecycle
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          DB_STRATEGY: ${{ inputs.db-strategy }}
+          STARTUP_TIMEOUT: ${{ inputs.startup-timeout-seconds }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR"
+          READY_FILE="$RUNNER_TEMP/qa-ready"
+          rm -f "$READY_FILE"
+          nohup uv run --project "$TOOLING_DIR" qa-lifecycle \
+            --backend-dir "$BACKEND_DIR" \
+            --frontend-dir "$FRONTEND_DIR" \
+            --db-strategy "$DB_STRATEGY" \
+            --result-json "$RESULTS_DIR/lifecycle.json" \
+            --ready-file "$READY_FILE" \
+            --pid-file "$RUNNER_TEMP/supervisor.pid" \
+            > "$RUNNER_TEMP/lifecycle.log" 2>&1 &
+          LAUNCHER_PID=$!
+          echo "$LAUNCHER_PID" > "$RUNNER_TEMP/launcher.pid"
+          echo "launcher_pid=$LAUNCHER_PID" >> "$GITHUB_OUTPUT"
+
+          DEADLINE=$(( $(date +%s) + STARTUP_TIMEOUT ))
+          while [ ! -f "$READY_FILE" ]; do
+            if ! kill -0 "$LAUNCHER_PID" 2>/dev/null; then
+              echo "::error::The lifecycle supervisor exited before the services became healthy."
+              tail -n 200 "$RUNNER_TEMP/lifecycle.log" || true
+              exit 1
+            fi
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "::error::Services did not become healthy within ${STARTUP_TIMEOUT}s."
+              tail -n 200 "$RUNNER_TEMP/lifecycle.log" || true
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "✅ Services healthy."
+          tail -n 40 "$RUNNER_TEMP/lifecycle.log" || true
+
+      # 6. The plan is cached by diff content, so re-running an unchanged commit reuses it
+      #    and makes no model call.
+      - name: Restore the test plan cache
+        uses: actions/cache@v4
+        with:
+          path: frontend/.qa-cache/test-plans
+          key: qa-test-plan-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            qa-test-plan-${{ github.event.pull_request.number }}-
+            qa-test-plan-
+
+      - name: Generate the test plan from the diff
+        working-directory: frontend
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # The diff is taken against the base branch, which a shallow or partial fetch
+          # would leave unresolvable. `+refs/heads/...` is explicit so the remote-tracking
+          # ref exists under the name qa-test-gen is given.
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          uv run --project "$TOOLING_DIR" qa-test-gen \
+            --commit-sha "$HEAD_SHA" \
+            --base-branch "origin/$BASE_REF" \
+            --output "$RESULTS_DIR/plan.json"
+
+      - name: Cache Playwright browsers
+        id: playwright_cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tooling/uv.lock') }}
+
+      - name: Install Playwright Chromium
+        run: uv run --project "$TOOLING_DIR" playwright install --with-deps chromium
+
+      # 7. Execute. The step is allowed to fail so the recording of the failure is still
+      #    processed and published; the job is failed at the end instead.
+      - name: Execute the test plan
+        id: tests
+        continue-on-error: true
+        run: |
+          uv run --project "$TOOLING_DIR" qa-run \
+            --plan "$RESULTS_DIR/plan.json" \
+            --runner playwright \
+            --base-url "$QA_BASE_URL" \
+            --video-dir "$MEDIA_DIR/raw" \
+            --result-json "$RESULTS_DIR/run.json"
+
+      - name: Compress the recording and build the preview GIF
+        id: media
+        if: always()
+        env:
+          # Read through the environment rather than interpolated into the script: the
+          # path originates from test runner output, which is untrusted text (Appendix B.3).
+          VIDEO: ${{ steps.tests.outputs.qa_primary_video }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VIDEO" ] || [ ! -f "$VIDEO" ]; then
+            echo "::notice::No recording was produced; publishing results without media."
+            exit 0
+          fi
+          uv run --project "$TOOLING_DIR" qa-media \
+            --input "$VIDEO" \
+            --output-dir "$MEDIA_DIR/processed" \
+            --result-json "$RESULTS_DIR/media.json"
+
+      - name: Publish the QA comment
+        id: qa_publish
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          QA_ARTIFACT_DIR: ${{ github.workspace }}/qa-artifacts
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # The PR head, never GITHUB_SHA, which on a pull_request event is the synthetic
+          # merge commit and appears nowhere in the PR's commit list (Directive 5.A.2).
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$RESULTS_DIR/run.json" ]; then
+            echo "::warning::No test result was written; nothing to publish."
+            exit 0
+          fi
+          uv run --project "$TOOLING_DIR" qa-publish \
+            --repo "$GITHUB_REPOSITORY" \
+            --pr "$PR_NUMBER" \
+            --sha "$HEAD_SHA" \
+            --test-result "$RESULTS_DIR/run.json" \
+            --media-result "$RESULTS_DIR/media.json" \
+            --branch-result "$RESULTS_DIR/branch.json" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      # Collects whatever the publisher staged when R2 was unavailable. Python cannot
+      # upload a workflow artifact itself, so this step completes that fallback.
+      - name: Upload QA media (storage fallback)
+        if: always() && hashFiles('qa-artifacts/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-media-${{ github.event.pull_request.head.sha }}
+          path: qa-artifacts
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-diagnostics-${{ github.run_id }}
+          path: |
+            qa-results
+            ${{ runner.temp }}/lifecycle.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop the services
+        if: always()
+        run: |
+          for PID_FILE in "$RUNNER_TEMP/supervisor.pid" "$RUNNER_TEMP/launcher.pid"; do
+            [ -f "$PID_FILE" ] || continue
+            PID=$(cat "$PID_FILE")
+            # SIGTERM reaches the supervisor's handler, which terminates the service tree
+            # and shreds the decrypted environment file.
+            kill -TERM "$PID" 2>/dev/null || true
+          done
+          rm -f "$RUNNER_TEMP/qa.env"
+          sleep 2
+
+      # The publishing steps above run on failure by design, so the job's own verdict is
+      # asserted last rather than inherited from the test step.
+      - name: Report the test outcome
+        if: always()
+        run: |
+          if [ "${{ steps.tests.outcome }}" != "success" ]; then
+            echo "::error::QA journeys failed. The recording and diagnostics are in the pull request comment."
+            exit 1
+          fi
+          echo "✅ All QA journeys passed."

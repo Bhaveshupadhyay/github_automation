@@ -1,0 +1,464 @@
+name: QA Mobile Preview
+
+# Reusable pipeline for mobile pull requests: boots the paired backend inside the runner,
+# builds the debug binary against it, and records Maestro journeys on an emulator.
+#
+# The backend is reached at 10.0.2.2 rather than localhost, because inside an Android
+# emulator localhost is the emulator itself. The address is supplied to the build under
+# the variable name the repository's own contract declares.
+#
+# Mobile runs are slower and flakier than web runs on hosted runners (Appendix A.5). Ship
+# the web pipeline first and treat this as an independent milestone.
+
+on:
+  workflow_call:
+    inputs:
+      backend-repo:
+        description: "Backend repository as owner/name, paired with the mobile PR."
+        type: string
+        required: true
+      backend-default-branch:
+        description: "Branch used when the PR declares no backend branch and no head matches."
+        type: string
+        required: false
+        default: "dev"
+      tooling-ref:
+        description: "Ref of bhaveshupadhyay/github_automation supplying the qa-* CLIs."
+        type: string
+        required: false
+        default: "main"
+      db-strategy:
+        description: "auto, cloud_dev or ephemeral_container."
+        type: string
+        required: false
+        default: "auto"
+      api-base-url:
+        description: "Address the app uses for the backend. 10.0.2.2 is the host as seen from an Android emulator."
+        type: string
+        required: false
+        default: "http://10.0.2.2:8000"
+      android-api-level:
+        description: "Emulator API level."
+        type: number
+        required: false
+        default: 34
+      java-version:
+        description: "JDK used by the Gradle build."
+        type: string
+        required: false
+        default: "17"
+      startup-timeout-seconds:
+        description: "Budget for backend dependency install, migrations and the health probe."
+        type: number
+        required: false
+        default: 420
+      timeout-minutes:
+        description: "Hard job timeout. Emulator boot and the Gradle build dominate it."
+        type: number
+        required: false
+        default: 25
+    secrets:
+      SOPS_AGE_KEY:
+        description: "The one application secret in GitHub Actions. Decrypts .env.qa.enc."
+        required: true
+      GEMINI_API_KEY:
+        description: "Diff analysis. Absent, test generation falls back to the baseline flows."
+        required: false
+      BACKEND_TOKEN:
+        description: "Read access to the backend repository when it is private."
+        required: false
+      SLACK_BOT_TOKEN:
+        description: "Slack thread reply. Skipped entirely when unset."
+        required: false
+
+concurrency:
+  group: qa-mobile-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  fork-notice:
+    if: github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Explain why no preview was produced
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTICE=$(cat <<'EOF'
+          <!-- qa-preview-bot -->
+          ### ⏭️ QA preview skipped — pull request from a fork
+
+          Secrets are not available to workflows triggered by a fork, so the QA environment
+          cannot be decrypted or started. Nothing is wrong with this pull request.
+
+          A maintainer can produce a preview by re-running this pull request from a branch
+          in this repository.
+          EOF
+          )
+          echo "$NOTICE" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s' "$NOTICE" | gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file - \
+            || echo "::notice::Could not post the notice; a fork token cannot comment. See the job summary."
+
+  qa-preview:
+    if: ${{ !github.event.pull_request.head.repo.fork }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      MOBILE_DIR: ${{ github.workspace }}/mobile
+      BACKEND_DIR: ${{ github.workspace }}/backend
+      TOOLING_DIR: ${{ github.workspace }}/tooling
+      RESULTS_DIR: ${{ github.workspace }}/qa-results
+      MEDIA_DIR: ${{ github.workspace }}/qa-media
+    steps:
+      - name: Checkout mobile app at the pull request head
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: mobile
+
+      - name: Checkout QA tooling
+        uses: actions/checkout@v4
+        with:
+          repository: bhaveshupadhyay/github_automation
+          ref: ${{ inputs.tooling-ref }}
+          path: tooling
+
+      - name: Set up Python and uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "tooling/uv.lock"
+
+      - name: Install QA tooling
+        run: uv sync --project "$TOOLING_DIR" --extra qa
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Set up Gradle with its cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Install SOPS and age
+        run: |
+          set -euo pipefail
+          SOPS_VERSION=v3.9.4
+          curl -fsSL -o /tmp/sops \
+            "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64"
+          sudo install -m 0755 /tmp/sops /usr/local/bin/sops
+          sudo apt-get update -qq && sudo apt-get install -y -qq age
+          sops --version
+
+      # The mobile contract carries the platform, bundle ID and binary path. Reading them
+      # here keeps the workflow free of per-repository hardcoding.
+      - name: Read the mobile QA contract
+        id: contract
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          # The schema travels with the tooling, so a repository cannot weaken validation
+          # by shipping its own copy.
+          uv run --project "$TOOLING_DIR" qa-contract qa-contract.json \
+            --schema "$TOOLING_DIR/qa-contract.schema.json"
+          BUNDLE_ID=$(python3 -c 'import json;print(json.load(open("qa-contract.json"))["mobileConfig"]["bundleId"])')
+          BUILD_PATH=$(python3 -c 'import json;print(json.load(open("qa-contract.json"))["mobileConfig"]["buildOutputPath"])')
+          API_ENV_VAR=$(python3 -c 'import json;print(json.load(open("qa-contract.json")).get("apiBaseUrlEnvVar",""))')
+          echo "bundle_id=$BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "build_path=$BUILD_PATH" >> "$GITHUB_OUTPUT"
+          echo "api_env_var=$API_ENV_VAR" >> "$GITHUB_OUTPUT"
+
+      - name: Check mobile secret drift
+        working-directory: mobile
+        run: |
+          if [ -f .env.example ]; then
+            uv run --project "$TOOLING_DIR" secret-drift
+          else
+            echo "::notice::No .env.example in the mobile repository; drift check skipped."
+          fi
+
+      - name: Resolve the backend branch
+        id: backend_branch
+        working-directory: mobile
+        env:
+          GH_TOKEN: ${{ secrets.BACKEND_TOKEN || github.token }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          BACKEND_REPO: ${{ inputs.backend-repo }}
+          DEFAULT_BRANCH: ${{ inputs.backend-default-branch }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR"
+          printf '%s' "$PR_BODY" > "$RESULTS_DIR/pr-body.txt"
+          uv run --project "$TOOLING_DIR" qa-branch-resolve \
+            --source-branch "$SOURCE_BRANCH" \
+            --backend-repo-url "https://github.com/${BACKEND_REPO}.git" \
+            --pr-body-file "$RESULTS_DIR/pr-body.txt" \
+            --default-branch "$DEFAULT_BRANCH" \
+            --json > "$RESULTS_DIR/branch.json"
+          BRANCH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_branch"])' "$RESULTS_DIR/branch.json")
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "Resolved backend branch: $BRANCH"
+
+      - name: Checkout backend at the resolved branch
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.backend-repo }}
+          ref: ${{ steps.backend_branch.outputs.branch }}
+          token: ${{ secrets.BACKEND_TOKEN || github.token }}
+          path: backend
+
+      - name: Check backend secret drift
+        working-directory: backend
+        run: |
+          if [ -f .env.example ]; then
+            uv run --project "$TOOLING_DIR" secret-drift
+          else
+            echo "::notice::No .env.example in the backend repository; drift check skipped."
+          fi
+
+      - name: Decrypt the QA environment
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SOPS_AGE_KEY:-}" ]; then
+            echo "::error::SOPS_AGE_KEY is not set. It is the one secret this pipeline requires."
+            exit 1
+          fi
+          if [ ! -f backend/.env.qa.enc ]; then
+            echo "::notice::No backend/.env.qa.enc; continuing without decrypted storage credentials."
+            exit 0
+          fi
+          # The type is stated rather than inferred: SOPS cannot derive dotenv from the
+          # .enc extension, and guesses YAML instead.
+          sops --decrypt --input-type dotenv --output-type dotenv \
+            backend/.env.qa.enc > "$RUNNER_TEMP/qa.env"
+          chmod 600 "$RUNNER_TEMP/qa.env"
+          while IFS='=' read -r key value; do
+            case "$key" in
+              R2_*|AWS_*|SLACK_CHANNEL|SLACK_THREAD|QA_BOT_LOGIN) ;;
+              *) continue ;;
+            esac
+            value="${value%\"}"; value="${value#\"}"
+            [ -n "$value" ] || continue
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$RUNNER_TEMP/qa.env" || true)
+
+      # Only the backend runs under the supervisor here; the app under test is a binary
+      # installed on the emulator rather than a served process.
+      - name: Start the backend and await health
+        id: lifecycle
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          DB_STRATEGY: ${{ inputs.db-strategy }}
+          STARTUP_TIMEOUT: ${{ inputs.startup-timeout-seconds }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR"
+          READY_FILE="$RUNNER_TEMP/qa-ready"
+          rm -f "$READY_FILE"
+          nohup uv run --project "$TOOLING_DIR" qa-lifecycle \
+            --backend-dir "$BACKEND_DIR" \
+            --db-strategy "$DB_STRATEGY" \
+            --result-json "$RESULTS_DIR/lifecycle.json" \
+            --ready-file "$READY_FILE" \
+            --pid-file "$RUNNER_TEMP/supervisor.pid" \
+            > "$RUNNER_TEMP/lifecycle.log" 2>&1 &
+          LAUNCHER_PID=$!
+          echo "$LAUNCHER_PID" > "$RUNNER_TEMP/launcher.pid"
+
+          DEADLINE=$(( $(date +%s) + STARTUP_TIMEOUT ))
+          while [ ! -f "$READY_FILE" ]; do
+            if ! kill -0 "$LAUNCHER_PID" 2>/dev/null; then
+              echo "::error::The lifecycle supervisor exited before the backend became healthy."
+              tail -n 200 "$RUNNER_TEMP/lifecycle.log" || true
+              exit 1
+            fi
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "::error::The backend did not become healthy within ${STARTUP_TIMEOUT}s."
+              tail -n 200 "$RUNNER_TEMP/lifecycle.log" || true
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "✅ Backend healthy."
+
+      - name: Build the debug binary against the runner backend
+        working-directory: mobile
+        env:
+          API_BASE_URL: ${{ inputs.api-base-url }}
+          API_ENV_VAR: ${{ steps.contract.outputs.api_env_var }}
+        run: |
+          set -euo pipefail
+          # The contract names the variable; the workflow supplies the value. Neither side
+          # hardcodes the other's convention.
+          if [ -n "$API_ENV_VAR" ]; then
+            export "$API_ENV_VAR=$API_BASE_URL"
+            echo "Building with $API_ENV_VAR=$API_BASE_URL"
+          else
+            echo "::warning::The contract declares no apiBaseUrlEnvVar; the build will use its own default backend address."
+          fi
+          PREPARE=$(python3 -c 'import json;c=json.load(open("qa-contract.json"));print((c.get("lifecycle") or {}).get("prepare") or c.get("prepare") or "")')
+          if [ -z "$PREPARE" ]; then
+            echo "::error::The mobile contract declares no prepare hook, so there is no way to build the binary."
+            exit 1
+          fi
+          bash -c "$PREPARE"
+
+      - name: Restore the test plan cache
+        uses: actions/cache@v4
+        with:
+          path: mobile/.qa-cache/test-plans
+          key: qa-mobile-plan-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            qa-mobile-plan-${{ github.event.pull_request.number }}-
+            qa-mobile-plan-
+
+      - name: Generate the test plan from the diff
+        working-directory: mobile
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          uv run --project "$TOOLING_DIR" qa-test-gen \
+            --commit-sha "$HEAD_SHA" \
+            --base-branch "origin/$BASE_REF" \
+            --output "$RESULTS_DIR/plan.json"
+
+      - name: Install Maestro
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Enable KVM for a hardware-accelerated emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # The emulator action owns the device lifecycle, so the journeys run inside its
+      # script rather than as sibling steps.
+      - name: Execute the flows on an emulator
+        id: tests
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          BUNDLE_ID: ${{ steps.contract.outputs.bundle_id }}
+          BUILD_PATH: ${{ steps.contract.outputs.build_path }}
+        with:
+          api-level: ${{ inputs.android-api-level }}
+          arch: x86_64
+          profile: pixel_6
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            adb install -r "$MOBILE_DIR/$BUILD_PATH"
+            uv run --project "$TOOLING_DIR" qa-run \
+              --plan "$RESULTS_DIR/plan.json" \
+              --runner maestro \
+              --app-id "$BUNDLE_ID" \
+              --base-url "${{ inputs.api-base-url }}" \
+              --video-dir "$MEDIA_DIR/raw" \
+              --result-json "$RESULTS_DIR/run.json"
+
+      - name: Compress the recording and build the preview GIF
+        id: media
+        if: always()
+        run: |
+          set -euo pipefail
+          # The emulator action runs the journeys in its own shell, so the recording is
+          # located here rather than read from a step output.
+          VIDEO=$(find "$MEDIA_DIR/raw" -maxdepth 1 -name '*.mp4' -print -quit 2>/dev/null || true)
+          if [ -z "$VIDEO" ]; then
+            echo "::notice::No recording was produced; publishing results without media."
+            exit 0
+          fi
+          uv run --project "$TOOLING_DIR" qa-media \
+            --input "$VIDEO" \
+            --output-dir "$MEDIA_DIR/processed" \
+            --result-json "$RESULTS_DIR/media.json"
+
+      - name: Publish the QA comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          QA_ARTIFACT_DIR: ${{ github.workspace }}/qa-artifacts
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$RESULTS_DIR/run.json" ]; then
+            echo "::warning::No test result was written; nothing to publish."
+            exit 0
+          fi
+          uv run --project "$TOOLING_DIR" qa-publish \
+            --repo "$GITHUB_REPOSITORY" \
+            --pr "$PR_NUMBER" \
+            --sha "$HEAD_SHA" \
+            --test-result "$RESULTS_DIR/run.json" \
+            --media-result "$RESULTS_DIR/media.json" \
+            --branch-result "$RESULTS_DIR/branch.json" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Upload QA media (storage fallback)
+        if: always() && hashFiles('qa-artifacts/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-media-${{ github.event.pull_request.head.sha }}
+          path: qa-artifacts
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-diagnostics-${{ github.run_id }}
+          path: |
+            qa-results
+            ${{ runner.temp }}/lifecycle.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop the backend
+        if: always()
+        run: |
+          for PID_FILE in "$RUNNER_TEMP/supervisor.pid" "$RUNNER_TEMP/launcher.pid"; do
+            [ -f "$PID_FILE" ] || continue
+            kill -TERM "$(cat "$PID_FILE")" 2>/dev/null || true
+          done
+          rm -f "$RUNNER_TEMP/qa.env"
+          sleep 2
+
+      - name: Report the test outcome
+        if: always()
+        run: |
+          if [ "${{ steps.tests.outcome }}" != "success" ]; then
+            echo "::error::QA flows failed. The recording and diagnostics are in the pull request comment."
+            exit 1
+          fi
+          echo "✅ All QA flows passed."

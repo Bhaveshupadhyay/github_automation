@@ -65,6 +65,21 @@ def main() -> None:
         action="store_true",
         help="Output LifecycleResult as JSON",
     )
+    parser.add_argument(
+        "--result-json",
+        default=None,
+        help="Write the LifecycleResult to this path. Written on failure too, so a CI step can report why startup failed.",
+    )
+    parser.add_argument(
+        "--ready-file",
+        default=None,
+        help="Create this file once every service is verified healthy. A CI step polls for it instead of guessing a sleep duration.",
+    )
+    parser.add_argument(
+        "--pid-file",
+        default=None,
+        help="Write this supervisor's PID here, so a later CI step can terminate it with SIGTERM.",
+    )
 
     args = parser.parse_args()
 
@@ -110,6 +125,8 @@ def main() -> None:
     if args.json:
         print(result.model_dump_json(indent=2))
 
+    _write_result_json(args.result_json, result)
+
     if not result.success:
         print(f"\n❌ Lifecycle Startup FAILED in {result.startup_duration_seconds:.2f}s:")
         print(f"   Error: {result.error_message}")
@@ -128,15 +145,77 @@ def main() -> None:
         sys.exit(0)
 
     # In interactive/daemon mode: wait for signal
-    print("\n⏳ Services running in background. Press Ctrl+C to terminate...")
+    _write_pid_file(args.pid_file)
+    # Published last, and only once the health probes have passed, so a waiting CI step
+    # that observes this file knows the services are actually serving traffic.
+    _signal_ready(args.ready_file)
+    print("\n⏳ Services running in background. Send SIGTERM or press Ctrl+C to terminate...")
     try:
         while True:
             time.sleep(1.0)
     except KeyboardInterrupt:
         print("\nInterrupt received. Terminating all services...")
     finally:
+        _remove_file(args.ready_file)
+        _remove_file(args.pid_file)
         supervisor.terminate_all()
         print("All processes terminated and transient files cleaned.")
+
+
+def _write_result_json(path: str | None, result) -> None:
+    """Persist the lifecycle outcome for later workflow steps.
+
+    Written on the failure path too: a startup timeout is precisely when the next stage
+    needs to explain itself rather than report a missing file.
+    """
+    if not path:
+        return
+    try:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    except OSError as e:
+        print(f"⚠️ Could not write the lifecycle result to {path}: {e}", file=sys.stderr)
+
+
+def _write_pid_file(path: str | None) -> None:
+    """Record this process's PID so a later step can terminate the whole service tree."""
+    if not path:
+        return
+    try:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    except OSError as e:
+        print(f"⚠️ Could not write the PID file {path}: {e}", file=sys.stderr)
+
+
+def _signal_ready(path: str | None) -> None:
+    """Publish the readiness marker atomically.
+
+    Written to a temporary name and renamed, because a poller that opens a half-written
+    marker would proceed against services that are not yet serving.
+    """
+    if not path:
+        return
+    try:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        staging = target.with_name(f"{target.name}.partial")
+        staging.write_text("ready\n", encoding="utf-8")
+        staging.replace(target)
+    except OSError as e:
+        print(f"⚠️ Could not write the readiness marker {path}: {e}", file=sys.stderr)
+
+
+def _remove_file(path: str | None) -> None:
+    """Clear a marker on shutdown, so a stale file cannot be read as liveness."""
+    if not path:
+        return
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":
