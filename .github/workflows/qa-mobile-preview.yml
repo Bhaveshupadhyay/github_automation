@@ -61,7 +61,7 @@ on:
         default: 25
     secrets:
       SOPS_AGE_KEY:
-        description: "The one application secret in GitHub Actions. Decrypts .env.qa.enc."
+        description: "Decrypts .env.qa.enc, the backend environment for the run."
         required: true
       GEMINI_API_KEY:
         description: "Diff analysis. Absent, test generation falls back to the baseline flows."
@@ -71,6 +71,21 @@ on:
         required: false
       SLACK_BOT_TOKEN:
         description: "Slack thread reply. Skipped entirely when unset."
+        required: false
+      R2_ACCOUNT_ID:
+        description: "Cloudflare account for R2. Overrides the value in .env.qa.enc."
+        required: false
+      R2_ACCESS_KEY_ID:
+        description: "R2 access key. Overrides the value in .env.qa.enc."
+        required: false
+      R2_SECRET_ACCESS_KEY:
+        description: "R2 secret key. Overrides the value in .env.qa.enc."
+        required: false
+      R2_BUCKET:
+        description: "R2 bucket for QA media. Overrides the value in .env.qa.enc."
+        required: false
+      R2_PUBLIC_BASE_URL:
+        description: "Public origin of the R2 bucket. Overrides the value in .env.qa.enc."
         required: false
 
 concurrency:
@@ -246,6 +261,9 @@ jobs:
             echo "::notice::No .env.example in the backend repository; drift check skipped."
           fi
 
+      # 4. Fail fast on a missing key or an undecryptable file, before minutes of
+      #    startup. Nothing is exported: the supervisor decrypts for the services and
+      #    the publish step decrypts for storage, each keeping the values to itself.
       - name: Decrypt the QA environment
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
@@ -256,24 +274,13 @@ jobs:
             exit 1
           fi
           if [ ! -f backend/.env.qa.enc ]; then
-            echo "::notice::No backend/.env.qa.enc; continuing without decrypted storage credentials."
+            echo "::notice::No backend/.env.qa.enc; storage credentials can only come from GitHub secrets."
             exit 0
           fi
           # The type is stated rather than inferred: SOPS cannot derive dotenv from the
           # .enc extension, and guesses YAML instead.
           sops --decrypt --input-type dotenv --output-type dotenv \
-            backend/.env.qa.enc > "$RUNNER_TEMP/qa.env"
-          chmod 600 "$RUNNER_TEMP/qa.env"
-          while IFS='=' read -r key value; do
-            case "$key" in
-              R2_*|AWS_*|SLACK_CHANNEL|SLACK_THREAD|QA_BOT_LOGIN) ;;
-              *) continue ;;
-            esac
-            value="${value%\"}"; value="${value#\"}"
-            [ -n "$value" ] || continue
-            echo "::add-mask::$value"
-            echo "$key=$value" >> "$GITHUB_ENV"
-          done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$RUNNER_TEMP/qa.env" || true)
+            backend/.env.qa.enc > /dev/null
 
       # Only the backend runs under the supervisor here; the app under test is a binary
       # installed on the emulator rather than a served process.
@@ -433,12 +440,47 @@ jobs:
           QA_ARTIFACT_DIR: ${{ github.workspace }}/qa-artifacts
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
         run: |
           set -euo pipefail
           if [ ! -f "$RESULTS_DIR/run.json" ]; then
             echo "::warning::No test result was written; nothing to publish."
             exit 0
           fi
+          # Storage credentials are loaded here and nowhere else. Exported to the job they
+          # would reach every later step, including the pull request's own code. An unset
+          # GitHub secret arrives as an empty string, so it is unset before the decrypted
+          # file is read, and a set one wins over the same key from .env.qa.enc.
+          for key in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_PUBLIC_BASE_URL; do
+            [ -n "${!key:-}" ] || unset "$key"
+          done
+          if [ -n "${SOPS_AGE_KEY:-}" ] && [ -f backend/.env.qa.enc ]; then
+            QA_ENV=$(mktemp "$RUNNER_TEMP/qa-publish.XXXXXX")
+            trap 'rm -f "$QA_ENV"' EXIT
+            if sops --decrypt --input-type dotenv --output-type dotenv \
+                backend/.env.qa.enc > "$QA_ENV"; then
+              while IFS='=' read -r key value; do
+                case "$key" in
+                  R2_*|AWS_*|SLACK_CHANNEL|SLACK_THREAD|QA_BOT_LOGIN) ;;
+                  *) continue ;;
+                esac
+                [ -z "${!key:-}" ] || continue
+                value="${value%\"}"; value="${value#\"}"
+                [ -n "$value" ] || continue
+                echo "::add-mask::$value"
+                export "$key=$value"
+              done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$QA_ENV" || true)
+            else
+              echo "::warning::Could not decrypt backend/.env.qa.enc; publishing without its storage credentials."
+            fi
+            rm -f "$QA_ENV"
+          fi
+          unset SOPS_AGE_KEY
           uv run --project "$TOOLING_DIR" qa-publish \
             --repo "$GITHUB_REPOSITORY" \
             --pr "$PR_NUMBER" \

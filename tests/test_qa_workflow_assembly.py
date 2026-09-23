@@ -16,6 +16,7 @@ TEMPLATE_DIR = REPO_ROOT / "contracts" / "templates" / "workflows"
 
 REUSABLE_WORKFLOWS = ["qa-web-preview.yml", "qa-mobile-preview.yml"]
 CALLER_TEMPLATES = ["qa-web-preview.caller.yml", "qa-mobile-preview.caller.yml"]
+R2_SECRETS = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_PUBLIC_BASE_URL"]
 
 
 def _load(path: Path) -> dict:
@@ -68,12 +69,44 @@ class TestReusableContract(unittest.TestCase):
                 self.assertEqual(list(triggers.keys()), ["workflow_call"])
 
     def test_sops_age_key_is_the_only_required_secret(self) -> None:
-        """Directive: GitHub Actions holds exactly one application secret."""
+        """Directive: a caller needs exactly one secret to run the pipeline."""
         for name in REUSABLE_WORKFLOWS:
             with self.subTest(workflow=name):
                 secrets = _triggers(_load(WORKFLOW_DIR / name))["workflow_call"]["secrets"]
                 required = [key for key, spec in secrets.items() if spec.get("required")]
                 self.assertEqual(required, ["SOPS_AGE_KEY"])
+
+    def test_storage_credentials_are_accepted_as_optional_secrets(self) -> None:
+        """R2 credentials may come from GitHub secrets instead of .env.qa.enc."""
+        for name in REUSABLE_WORKFLOWS:
+            with self.subTest(workflow=name):
+                secrets = _triggers(_load(WORKFLOW_DIR / name))["workflow_call"]["secrets"]
+                for key in R2_SECRETS:
+                    self.assertIn(key, secrets)
+                    self.assertFalse(secrets[key].get("required"))
+
+    def test_storage_credentials_reach_only_the_publish_step(self) -> None:
+        """Written to GITHUB_ENV, credentials reach every later step, including the pull
+        request's own test plan and build hooks. Only the publisher needs them."""
+        for name in REUSABLE_WORKFLOWS:
+            job = _preview_job(_load(WORKFLOW_DIR / name))
+            with self.subTest(workflow=name):
+                publish = _step_index(job, "Publish the QA comment")
+                for index, step in enumerate(job["steps"]):
+                    run = str(step.get("run", ""))
+                    self.assertFalse("R2_" in run and "GITHUB_ENV" in run, step.get("name"))
+                    if index != publish:
+                        self.assertNotIn("secrets.R2_", str(step.get("env", "")), step.get("name"))
+                step_env = job["steps"][publish]["env"]
+                for key in R2_SECRETS:
+                    self.assertEqual(step_env[key], f"${{{{ secrets.{key} }}}}")
+
+    def test_decryption_exports_nothing_to_the_job(self) -> None:
+        for name in REUSABLE_WORKFLOWS:
+            job = _preview_job(_load(WORKFLOW_DIR / name))
+            with self.subTest(workflow=name):
+                decrypt = job["steps"][_step_index(job, "Decrypt the QA environment")]
+                self.assertNotIn("GITHUB_ENV", decrypt["run"])
 
     def test_the_tooling_checkout_defaults_to_this_workflows_own_commit(self) -> None:
         """A caller pinned to a branch must get that branch's CLIs. Defaulting to `main`
@@ -281,16 +314,17 @@ class TestUntrustedTextHandling(unittest.TestCase):
                 self.assertIn("selected-video.txt", media["run"])
                 self.assertNotIn("find ", media["run"])
 
-    def test_decrypted_values_are_masked_before_export(self) -> None:
-        """An unmasked value appears in plain text in the run log."""
+    def test_publish_step_masks_and_removes_decrypted_values(self) -> None:
+        """An unmasked value appears in plain text in the run log, and a decrypted file
+        in the workspace could be uploaded with the artifacts."""
         for name in REUSABLE_WORKFLOWS:
             job = _preview_job(_load(WORKFLOW_DIR / name))
             with self.subTest(workflow=name):
-                decrypt = job["steps"][_step_index(job, "Decrypt the QA environment")]
-                self.assertIn("::add-mask::", decrypt["run"])
-                # Written outside the workspace, so no later step can upload or commit it.
-                self.assertIn("$RUNNER_TEMP/qa.env", decrypt["run"])
-                self.assertNotIn("$GITHUB_WORKSPACE/qa.env", decrypt["run"])
+                publish = job["steps"][_step_index(job, "Publish the QA comment")]["run"]
+                self.assertIn("::add-mask::", publish)
+                self.assertIn('mktemp "$RUNNER_TEMP/', publish)
+                self.assertIn('rm -f "$QA_ENV"', publish)
+                self.assertNotIn("GITHUB_ENV", publish)
 
     def test_the_decrypted_file_is_removed_on_every_exit_path(self) -> None:
         for name in REUSABLE_WORKFLOWS:
@@ -333,6 +367,8 @@ class TestCallerTemplates(unittest.TestCase):
                 job = _load(TEMPLATE_DIR / template)["jobs"]["qa"]
                 self.assertIn(f".github/workflows/{workflow}@", job["uses"])
                 self.assertIn("SOPS_AGE_KEY", job["secrets"])
+                for key in R2_SECRETS:
+                    self.assertIn(key, job["secrets"])
                 self.assertIn("backend-repo", job["with"])
 
     def test_templates_trigger_on_the_pull_request_events_that_change_code(self) -> None:
