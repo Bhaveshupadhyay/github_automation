@@ -62,6 +62,14 @@ from automation.domain.media_processing import (
     MediaArtifact,
     MediaProcessingResult,
 )
+from automation.domain.storage import (
+    StorageProviderType,
+    ArtifactKind,
+    UploadedArtifact,
+    UploadOutcome,
+    CONTENT_TYPES,
+)
+from automation.domain.qa_report import QAReport
 
 __all__ = [
     "DEFAULT_GEMINI_MODEL",
@@ -117,4 +125,10 @@ __all__ = [
     "TestRunResult",
     "MediaArtifact",
     "MediaProcessingResult",
+    "StorageProviderType",
+    "ArtifactKind",
+    "UploadedArtifact",
+    "UploadOutcome",
+    "CONTENT_TYPES",
+    "QAReport",
 ]

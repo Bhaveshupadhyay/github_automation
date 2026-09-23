@@ -26,6 +26,11 @@ from automation.core.dependency import (
     get_diff_test_generator_service,
     get_test_runner_service,
     get_media_processor_service,
+    get_r2_storage_provider,
+    get_github_artifact_storage_provider,
+    get_storage_provider,
+    get_pr_comment_publisher,
+    get_qa_report_formatter,
 )
 
 __all__ = [
@@ -56,5 +61,10 @@ __all__ = [
     "get_diff_test_generator_service",
     "get_test_runner_service",
     "get_media_processor_service",
+    "get_r2_storage_provider",
+    "get_github_artifact_storage_provider",
+    "get_storage_provider",
+    "get_pr_comment_publisher",
+    "get_qa_report_formatter",
 ]
 

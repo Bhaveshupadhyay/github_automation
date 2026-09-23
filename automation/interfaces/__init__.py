@@ -23,6 +23,8 @@ from automation.interfaces.wireguard_interface import IWireGuardService
 from automation.interfaces.diff_test_generator_interface import IDiffTestGeneratorService
 from automation.interfaces.test_runner_interface import ITestRunnerService
 from automation.interfaces.media_processor_interface import IMediaProcessorService
+from automation.interfaces.storage_interface import IStorageProvider
+from automation.interfaces.pr_comment_interface import IPRCommentPublisher, PRCommentResult
 
 __all__ = [
     "ICodeDevelopmentService",
@@ -49,5 +51,8 @@ __all__ = [
     "IDiffTestGeneratorService",
     "ITestRunnerService",
     "IMediaProcessorService",
+    "IStorageProvider",
+    "IPRCommentPublisher",
+    "PRCommentResult",
 ]
 

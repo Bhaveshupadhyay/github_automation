@@ -28,6 +28,7 @@ build/
 *.egg-info/
 workspace_target/
 .qa-cache/
+qa-artifacts/
 graphify-out/
 brag-output*/
 

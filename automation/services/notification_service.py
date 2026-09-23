@@ -87,6 +87,22 @@ class NotificationService(INotificationService):
         }
         self._dispatch_async(payload)
 
+    def send_qa_result_notification(self, text: str, pr_url: Optional[str] = None):
+        """Posts a QA preview result into the Slack thread without blocking CI.
+
+        Reuses the shared async dispatcher, so a Slack outage degrades to a logged
+        warning rather than a failed pipeline step.
+        """
+        body = text
+        if pr_url:
+            body = f"{body}\n🔗 <{pr_url}|View the pull request>"
+
+        payload = {
+            "channel": self.config.slack_channel,
+            "text": body,
+        }
+        self._dispatch_async(payload)
+
     def send_deployment_notification(self, deploy_result: Dict[str, Any]):
         status_emoji = "✅" if deploy_result.get("success") else "❌"
         status_text = "SUCCESSFUL" if deploy_result.get("success") else "FAILED"
