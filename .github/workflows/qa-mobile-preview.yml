@@ -269,15 +269,17 @@ jobs:
         with:
           cache-read-only: false
 
-      - name: Install SOPS and age
+      - name: Install SOPS, age and FFmpeg
         run: |
           set -euo pipefail
           SOPS_VERSION=v3.9.4
           curl -fsSL -o /tmp/sops \
             "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64"
           sudo install -m 0755 /tmp/sops /usr/local/bin/sops
-          sudo apt-get update -qq && sudo apt-get install -y -qq age
+          # FFmpeg compresses the recording and builds the preview GIF.
+          sudo apt-get update -qq && sudo apt-get install -y -qq age ffmpeg
           sops --version
+          ffmpeg -version | sed -n 1p
 
       # The mobile contract carries the platform, bundle ID and binary path. Reading them
       # here keeps the workflow free of per-repository hardcoding.

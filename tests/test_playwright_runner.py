@@ -15,7 +15,12 @@ from automation.domain.test_plan import (
     TestPlan,
 )
 from automation.domain.test_run import TestOutcome, TestRunConfig, TestRunResult
-from automation.services.playwright_test_runner_service import PlaywrightTestRunnerService
+from automation.services.playwright_test_runner_service import (
+    PlaywrightTestRunnerService,
+    _clickable,
+    _dropdown,
+    _text_field,
+)
 
 
 # --- Fixtures ---
@@ -164,6 +169,21 @@ class TestGenerateTestScript:
         tree = ast.parse(script_content)
         assert not any(isinstance(n, ast.Attribute) and n.attr == "system" for n in ast.walk(tree))
         assert repr(injected) in script_content
+
+    def test_script_finds_controls_with_the_shared_locator_helpers(self):
+        """Generated scripts carry the helpers and use them, so they match execute()."""
+        service = PlaywrightTestRunnerService()
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            service.generate_test_script(_make_plan(), output_dir)
+            login = open(os.path.join(output_dir, "test_journey_0.py")).read()
+            settings = open(os.path.join(output_dir, "test_journey_1.py")).read()
+
+        defined = {n.name for n in ast.walk(ast.parse(login)) if isinstance(n, ast.FunctionDef)}
+        assert {"_best_match", "_clickable", "_text_field", "_dropdown"} <= defined
+        assert "_text_field(page, 'Email').fill('user@test.com')" in login
+        assert "_clickable(page, 'Sign In').click()" in login
+        assert "_dropdown(page, 'Theme').select_option('dark')" in settings
 
     def test_script_resolves_routes_against_base_url(self):
         service = PlaywrightTestRunnerService()
@@ -319,3 +339,63 @@ class TestWaitContract:
         script = self._script_for(self._plan_with_wait(target="Saved"))
 
         assert "expect(page.get_by_text('Saved').first).to_be_visible()" in script
+
+
+LOCATOR_PAGE = """
+<nav>
+  <div style="display:none"><a href="#mobile" onclick="document.title='hidden'">Admin Panel</a></div>
+  <a href="#admin" onclick="document.title='admin'">Admin Panel</a>
+  <a href="#settings" title="Settings" onclick="document.title='settings'"><svg width="10" height="10"></svg></a>
+</nav>
+<input id="search" placeholder="Search posts by title or content..." />
+<label>Title <input id="title" /></label>
+<select id="category"><option>All Categories</option><option>Music</option></select>
+"""
+
+
+@pytest.fixture(scope="module")
+def locator_page():
+    """A page shaped like typical app markup, in a real Chromium. Skipped when unavailable."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    with sync_api.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"Chromium is not installed: {exc}")
+        page = browser.new_page()
+        yield page
+        browser.close()
+
+
+class TestLocatorHelpers:
+    """The helpers resolve the names a plan uses on markup without labels or test IDs."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_page(self, locator_page):
+        locator_page.set_content(LOCATOR_PAGE)
+        self.page = locator_page
+
+    def test_click_skips_a_hidden_duplicate_link(self):
+        _clickable(self.page, "Admin Panel").click(timeout=3000)
+        assert self.page.title() == "admin"
+
+    def test_click_finds_an_icon_only_link_by_title(self):
+        _clickable(self.page, "Settings").click(timeout=3000)
+        assert self.page.title() == "settings"
+
+    def test_click_accepts_a_partial_name(self):
+        _clickable(self.page, "Admin").click(timeout=3000)
+        assert self.page.title() == "admin"
+
+    def test_fill_finds_a_field_by_placeholder(self):
+        _text_field(self.page, "Search posts by title or content...").fill("beats", timeout=3000)
+        assert self.page.locator("#search").input_value() == "beats"
+
+    def test_fill_prefers_an_exact_label_over_a_partial_placeholder(self):
+        _text_field(self.page, "Title").fill("New post", timeout=3000)
+        assert self.page.locator("#title").input_value() == "New post"
+        assert self.page.locator("#search").input_value() == ""
+
+    def test_select_finds_an_unlabelled_dropdown_by_an_option(self):
+        _dropdown(self.page, "All Categories").select_option("Music", timeout=3000)
+        assert self.page.locator("#category").input_value() == "Music"

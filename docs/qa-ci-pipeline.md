@@ -95,7 +95,7 @@ resolved from the PR (explicit declaration → matching remote head → default)
 **`qa-preview`** runs the pull request's code:
 
 1. Checkout the PR head commit with full history, and this repository's tooling.
-2. Install SOPS and age; key-drift check on the frontend.
+2. Install SOPS, age and FFmpeg; key-drift check on the frontend.
 3. Checkout the backend at the chosen PR or branch; key-drift check on the backend.
 4. Check that `.env.qa.enc` decrypts, failing fast on a bad key. Nothing is exported.
 5. Start the database, backend and frontend, with the frontend's `apiBaseUrlEnvVar`

@@ -262,15 +262,17 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install SOPS and age
+      - name: Install SOPS, age and FFmpeg
         run: |
           set -euo pipefail
           SOPS_VERSION=v3.9.4
           curl -fsSL -o /tmp/sops \
             "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64"
           sudo install -m 0755 /tmp/sops /usr/local/bin/sops
-          sudo apt-get update -qq && sudo apt-get install -y -qq age
+          # FFmpeg compresses the recording and builds the preview GIF.
+          sudo apt-get update -qq && sudo apt-get install -y -qq age ffmpeg
           sops --version
+          ffmpeg -version | sed -n 1p
 
       # 2. Fail here, before anything is started, when the PR adds a variable to
       #    .env.example without adding it to .env.qa.enc. The alternative is a service
