@@ -206,16 +206,16 @@ class LifecycleSupervisorService(ILifecycleSupervisor):
             name="backend",
             pid=backend_proc.pid,
             port=backend_contract.port,
-            health_url=backend_contract.health_check_url,
+            health_url=backend_contract.get_effective_health_url(),
             status=ServiceStatus.STARTING,
             start_command=backend_cmd,
             log_file_path=str(backend_log_file),
         )
 
         # 5. Poll Backend Health Readiness
-        logger.info(f"Polling backend readiness at {backend_contract.health_check_url} (timeout={backend_health_timeout}s)...")
+        logger.info(f"Polling backend readiness at {backend_contract.get_effective_health_url()} (timeout={backend_health_timeout}s)...")
         backend_check = self._health_check_service.poll_health(
-            backend_contract.health_check_url,
+            backend_contract.get_effective_health_url(),
             timeout_seconds=backend_health_timeout,
         )
         backend_ready = backend_check.healthy if hasattr(backend_check, "healthy") else bool(backend_check)
@@ -228,7 +228,7 @@ class LifecycleSupervisorService(ILifecycleSupervisor):
                     log_tail = "\n" + "\n".join(backend_log_file.read_text().splitlines()[-20:])
                 except Exception:
                     pass
-            err = f"Backend health check timed out after {backend_health_timeout}s at {backend_contract.health_check_url}.{log_tail}"
+            err = f"Backend health check timed out after {backend_health_timeout}s at {backend_contract.get_effective_health_url()}.{log_tail}"
             logger.error(err)
             self.terminate_all()
             return LifecycleResult(
@@ -240,7 +240,7 @@ class LifecycleSupervisorService(ILifecycleSupervisor):
             )
 
         self._backend_info.status = ServiceStatus.HEALTHY
-        logger.info(f"Backend is ready and healthy at {backend_contract.health_check_url}!")
+        logger.info(f"Backend is ready and healthy at {backend_contract.get_effective_health_url()}!")
 
         # 6. Start Frontend Service (if provided), pointed at the backend just started
         # unless the caller supplied another API address.
@@ -378,15 +378,15 @@ class LifecycleSupervisorService(ILifecycleSupervisor):
             name="frontend",
             pid=fe_proc.pid,
             port=frontend_contract.port,
-            health_url=frontend_contract.health_check_url,
+            health_url=frontend_contract.get_effective_health_url(),
             status=ServiceStatus.STARTING,
             start_command=fe_cmd,
             log_file_path=str(fe_log_file),
         )
 
-        logger.info(f"Polling frontend readiness at {frontend_contract.health_check_url} (timeout={frontend_health_timeout}s)...")
+        logger.info(f"Polling frontend readiness at {frontend_contract.get_effective_health_url()} (timeout={frontend_health_timeout}s)...")
         frontend_check = self._health_check_service.poll_health(
-            frontend_contract.health_check_url,
+            frontend_contract.get_effective_health_url(),
             timeout_seconds=frontend_health_timeout,
         )
         frontend_ready = frontend_check.healthy if hasattr(frontend_check, "healthy") else bool(frontend_check)
@@ -399,7 +399,7 @@ class LifecycleSupervisorService(ILifecycleSupervisor):
                     log_tail = "\n" + "\n".join(fe_log_file.read_text().splitlines()[-20:])
                 except Exception:
                     pass
-            err = f"Frontend health check timed out after {frontend_health_timeout}s at {frontend_contract.health_check_url}.{log_tail}"
+            err = f"Frontend health check timed out after {frontend_health_timeout}s at {frontend_contract.get_effective_health_url()}.{log_tail}"
             logger.error(err)
             self.terminate_all()
             return LifecycleResult(
@@ -412,7 +412,7 @@ class LifecycleSupervisorService(ILifecycleSupervisor):
             )
 
         self._frontend_info.status = ServiceStatus.HEALTHY
-        logger.info(f"Frontend is ready and healthy at {frontend_contract.health_check_url}!")
+        logger.info(f"Frontend is ready and healthy at {frontend_contract.get_effective_health_url()}!")
         return None
 
     def terminate_all(self) -> None:

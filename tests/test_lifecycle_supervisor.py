@@ -287,6 +287,35 @@ class TestLifecycleSupervisor(unittest.TestCase):
         fe_env = mock_tree.spawn_service_process.call_args_list[1].kwargs["env"]
         self.assertEqual(fe_env["NEXT_PUBLIC_API_BASE_URL"], "https://elsewhere.example.com")
 
+    def test_path_only_health_urls_are_polled_on_the_contract_port(self) -> None:
+        """The schema allows `"healthCheckUrl": "/health"`. Polled as written, that is not
+        a URL, and every run would time out at startup."""
+        backend = {**self.backend_contract_data, "healthCheckUrl": "/health"}
+        frontend = {**self.frontend_contract_data, "healthCheckUrl": "/"}
+        mock_validator = MagicMock(spec=IQAContractValidatorService)
+        mock_validator.validate_contract_file.side_effect = [
+            QAContract.model_validate(backend),
+            QAContract.model_validate(frontend),
+        ]
+        mock_health = MagicMock(spec=IHealthCheckService)
+        mock_health.poll_health.return_value = True
+        mock_tree = MagicMock(spec=IProcessTreeManager)
+        mock_tree.spawn_service_process.side_effect = [MagicMock(pid=1), MagicMock(pid=2)]
+        supervisor = LifecycleSupervisorService(
+            sops_service=MagicMock(spec=ISOpsService),
+            qa_contract_validator=mock_validator,
+            health_check_service=mock_health,
+            process_tree_manager=mock_tree,
+        )
+
+        result = supervisor.start_services(backend_dir=self.backend_dir, frontend_dir=self.frontend_dir)
+
+        self.assertTrue(result.success)
+        polled = [c.args[0] for c in mock_health.poll_health.call_args_list]
+        self.assertEqual(polled, ["http://localhost:8000/health", "http://localhost:3000/"])
+        self.assertEqual(result.backend_info.health_url, "http://localhost:8000/health")
+        self.assertEqual(result.frontend_info.health_url, "http://localhost:3000/")
+
     def test_live_concurrent_health_verification(self) -> None:
         """Starts real live HTTP services on separate ports and confirms both return HTTP 200 simultaneously."""
         import sys
