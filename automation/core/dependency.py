@@ -28,6 +28,8 @@ from automation.interfaces import (
     IDiffTestGeneratorService,
     ITestRunnerService,
     IMediaProcessorService,
+    IStorageProvider,
+    IPRCommentPublisher,
 )
 
 from automation.domain import (
@@ -67,6 +69,11 @@ from automation.services.gemini_diff_test_generator_service import GeminiDiffTes
 from automation.services.playwright_test_runner_service import PlaywrightTestRunnerService
 from automation.services.maestro_test_runner_service import MaestroTestRunnerService
 from automation.services.ffmpeg_media_processor_service import FFmpegMediaProcessorService
+from automation.services.r2_storage_provider import R2StorageProvider
+from automation.services.github_artifact_storage_provider import GitHubArtifactStorageProvider
+from automation.services.fallback_storage_provider import FallbackStorageProvider
+from automation.services.github_pr_comment_publisher import GitHubPRCommentPublisher
+from automation.services.qa_report_formatter import QAReportFormatter
 
 
 @lru_cache(maxsize=1)
@@ -266,3 +273,43 @@ def get_media_processor_service(
 ) -> IMediaProcessorService:
     """Returns IMediaProcessorService implementation (FFmpeg-based)."""
     return FFmpegMediaProcessorService(ffmpeg_binary=ffmpeg_binary)
+
+
+def get_r2_storage_provider() -> R2StorageProvider:
+    """Returns the Cloudflare R2 storage provider, configured from R2_* env vars."""
+    return R2StorageProvider()
+
+
+def get_github_artifact_storage_provider(
+    staging_dir: Optional[str] = None,
+) -> IStorageProvider:
+    """Returns the GitHub Actions artifact fallback storage provider."""
+    return GitHubArtifactStorageProvider(staging_dir=staging_dir)
+
+
+def get_storage_provider(
+    primary: Optional[IStorageProvider] = None,
+    fallback: Optional[IStorageProvider] = None,
+) -> FallbackStorageProvider:
+    """Returns the composed storage chain: R2 first, workflow artifacts on failure.
+
+    Typed as the concrete composite because callers rely on its non-raising
+    `try_upload` and on `degraded` to report which backend served a run.
+    """
+    return FallbackStorageProvider(
+        primary=primary or get_r2_storage_provider(),
+        fallback=fallback or get_github_artifact_storage_provider(),
+    )
+
+
+def get_pr_comment_publisher(
+    token: Optional[str] = None,
+    bot_login: Optional[str] = None,
+) -> IPRCommentPublisher:
+    """Returns the idempotent GitHub PR comment publisher."""
+    return GitHubPRCommentPublisher(token=token, bot_login=bot_login)
+
+
+def get_qa_report_formatter() -> QAReportFormatter:
+    """Returns the QA report markdown formatter."""
+    return QAReportFormatter()

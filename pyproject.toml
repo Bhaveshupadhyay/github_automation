@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 qa = [
     "playwright>=1.40.0",
+    "boto3>=1.34.0",
 ]
 
 [project.scripts]
@@ -35,6 +36,7 @@ qa-contract = "automation.qa_contract_cli:main"
 secret-drift = "automation.secret_drift_cli:main"
 qa-test-gen = "automation.qa_test_generator_cli:main"
 qa-media = "automation.qa_media_processor_cli:main"
+qa-publish = "automation.qa_publish_cli:main"
 
 
 [build-system]
