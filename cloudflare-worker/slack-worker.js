@@ -11,8 +11,10 @@ import { SlackService } from "./src/services/slackService.js";
 import { GithubService } from "./src/services/githubService.js";
 import { QaTargetRegistryService } from "./src/services/qaTargetRegistryService.js";
 import { QaRequestService } from "./src/services/qaRequestService.js";
+import { parseTargetRepo } from "./src/services/targetRepoParser.js";
 
-const OWNER_REPO_REGEX = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const REPO_QUESTION =
+  "❓ *Antigravity AI Clarification:* Which repository should I work in? Reply in this thread with `owner/repo`.";
 
 /**
  * Verifies Slack HMAC-SHA256 request signature.
@@ -160,20 +162,7 @@ export default {
  * Handles incoming user commands or app mentions with Fast-Path Intent Routing.
  */
 async function handleCommandOrMention(text, channelId, userId, threadTs, parentThreadTs, env, intentService, slackService, githubService, qaRequestService) {
-  const parts = text.trim().split(/\s+/);
-  let repo = env.DEFAULT_GITHUB_REPO || "";
-  let prompt = text.trim();
-
-  if (parts.length > 1 && OWNER_REPO_REGEX.test(parts[0])) {
-    repo = parts[0];
-    prompt = parts.slice(1).join(" ");
-  }
-
-  if (!repo) {
-    console.error("No target repository configured or specified.");
-    await slackService.postMessage(channelId, "⚠️ *Error:* No target repository specified or configured.", threadTs);
-    return;
-  }
+  const { repo, prompt } = parseTargetRepo(text);
 
   // A tagged answer to the bot's backend question is handled by the thread-reply path.
   if (await qaRequestService.pendingQuestion(channelId, parentThreadTs, threadTs)) {
@@ -194,19 +183,47 @@ async function handleCommandOrMention(text, channelId, userId, threadTs, parentT
     return;
   }
 
+  // A tagged reply in a request's thread is also delivered as a thread message, and that
+  // path resumes the request; handling it here too would start a second run.
+  if (parentThreadTs) {
+    const { parentRepo, parentPrompt } = await slackService.fetchThreadParent(channelId, parentThreadTs);
+    if (parentRepo || parentPrompt) {
+      return;
+    }
+  }
+
   let currentThreadTs = threadTs;
 
-  if (intent === IntentType.CLARIFICATION_NEEDED && question) {
-    console.log(`[Fast-Path] Clarification requested for repo ${repo}: ${question}`);
-    if (!currentThreadTs) {
-      currentThreadTs = await slackService.postMessage(
-        channelId,
-        `🤖 *Antigravity AI Request Received*\n📦 *Repo:* \`${repo}\`\n📌 *Prompt:* \`${prompt}\``
-      );
-    }
+  // The thread-reply path resumes from the Repo and Prompt markers in this header, so it is
+  // posted into the thread even when the request itself starts the thread.
+  const postRequestHeader = async () => {
+    const repoLine = repo ? `\n📦 *Repo:* \`${repo}\`` : "";
+    const ts = await slackService.postMessage(
+      channelId,
+      `🤖 *Antigravity AI Request Received*${repoLine}\n📌 *Prompt:* \`${prompt}\``,
+      currentThreadTs
+    );
+    currentThreadTs ||= ts;
+  };
+
+  // No default repository: ask for one. The header then carries only the prompt, and the
+  // thread-reply path takes the repository from the answer.
+  if (!repo) {
+    await postRequestHeader();
+    await slackService.postMessage(channelId, REPO_QUESTION, currentThreadTs);
+    return;
+  }
+
+  const clarification = prompt
+    ? intent === IntentType.CLARIFICATION_NEEDED && question
+    : `What should I change in \`${repo}\`?`;
+
+  if (clarification) {
+    console.log(`[Fast-Path] Clarification requested for repo ${repo}: ${clarification}`);
+    await postRequestHeader();
     await slackService.postMessage(
       channelId,
-      `❓ *Antigravity AI Clarification:* ${question}`,
+      `❓ *Antigravity AI Clarification:* ${clarification}`,
       currentThreadTs
     );
     return;
@@ -252,7 +269,7 @@ async function handleSlackThreadReply(event, env, intentService, slackService, g
     return;
   }
 
-  const targetRepo = parentRepo || env.DEFAULT_GITHUB_REPO || "";
+  const targetRepo = parentRepo || parseTargetRepo(userReply.replace(/<@[A-Z0-9]+>/g, "")).repo;
 
   // A QA request is not a coding clarification. QA starts only when the bot is tagged,
   // which the app_mention path handles; resuming the coding run here would change code.
@@ -260,12 +277,17 @@ async function handleSlackThreadReply(event, env, intentService, slackService, g
   if (intent === IntentType.QA_TESTING) {
     return;
   }
+  if (!targetRepo) {
+    await slackService.postMessage(channelId, REPO_QUESTION, threadTs);
+    return;
+  }
+
   const combinedPrompt = `Original Request: "${parentPrompt}". User Clarification: "${userReply}"`;
 
   // Inform thread that execution is resuming
   await slackService.postMessage(
     channelId,
-    `⚡ *Clarification Received!* Resuming Antigravity Engine execution with: \`${userReply}\`...`,
+    `⚡ *Clarification Received!* Resuming Antigravity Engine execution with: \`${userReply}\`...\n📦 *Repo:* \`${targetRepo}\``,
     threadTs
   );
 

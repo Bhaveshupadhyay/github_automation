@@ -71,18 +71,18 @@ export class SlackService {
 
       const data = await res.json();
       if (data.ok && Array.isArray(data.messages)) {
-        // Search through messages in the thread to find the context marker
+        // The first Repo and Prompt markers in the thread. They can sit in different messages:
+        // a request that named no repository gets its Repo marker when the reply supplies one.
+        let parentRepo = "";
+        let parentPrompt = "";
         for (const msg of data.messages) {
           const text = msg.text || "";
-          const repoMatch = text.match(/Repo:\*\s*`([^`]+)`/);
-          const promptMatch = text.match(/Prompt:\*\s*`([^`]+)`/);
+          parentRepo ||= text.match(/Repo:\*\s*`([^`]+)`/)?.[1] || "";
+          parentPrompt ||= text.match(/Prompt:\*\s*`([^`]+)`/)?.[1] || "";
+        }
 
-          if (repoMatch || promptMatch) {
-            return {
-              parentRepo: repoMatch ? repoMatch[1] : "",
-              parentPrompt: promptMatch ? promptMatch[1] : "Previous Coding Request"
-            };
-          }
+        if (parentRepo || parentPrompt) {
+          return { parentRepo, parentPrompt: parentPrompt || "Previous Coding Request" };
         }
       }
     } catch (err) {

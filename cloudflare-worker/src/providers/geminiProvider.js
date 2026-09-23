@@ -21,7 +21,9 @@ export class GeminiProvider extends BaseLlmProvider {
     
     const systemInstruction = 
       "You are an intent classifier for an automated AI software developer agent. " +
-      "Analyze the user's request. If the user asks to QA test, test, verify, or record an existing " +
+      "Analyze the user's request. The target repository has already been resolved from the message: " +
+      "never ask which repository to use, even if the prompt also mentions other repositories. " +
+      "If the user asks to QA test, test, verify, or record an existing " +
       "pull request or its changes (rather than to write or change code), " +
       `respond with JSON: {"intent": "${IntentType.QA_TESTING}"}.\n` +
       "If the prompt specifies a clear coding task or instruction, " +

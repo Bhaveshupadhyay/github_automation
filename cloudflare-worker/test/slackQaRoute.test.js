@@ -9,7 +9,6 @@ const ENV = {
   SLACK_BOT_TOKEN: "xoxb",
   WORKFLOW_REPO_OWNER: "bhaveshupadhyay",
   WORKFLOW_REPO_NAME: "github_automation",
-  DEFAULT_GITHUB_REPO: "acme/api",
 };
 const REGISTRY = { targets: { "acme/web": { platform: "web", backend_repo: "acme/api" } } };
 const realFetch = globalThis.fetch;
@@ -101,4 +100,56 @@ test("the thread-reply copy of a QA request neither resumes coding nor dispatche
   const calls = mockServices("QA_TESTING", BOT_THREAD);
   await run({ type: "message", text: "<@UBOT> run qa on this", channel: "C1", ts: "200.2", thread_ts: "100.1" });
   assert.deepEqual(dispatchesOf(calls), []);
+});
+
+test("a coding request with a labeled repository dispatches for that repository without asking", async () => {
+  const calls = mockServices("CODE_DEVELOPMENT");
+  await run({
+    type: "app_mention",
+    text: "<@UBOT> target repo: acme/web\nadd admin panel to this. it should be able to view, add, update, delete the post.",
+    channel: "C1",
+    ts: "300.4",
+  });
+  const [dispatch] = dispatchesOf(calls);
+  assert.equal(dispatch.client_payload.target_repo, "acme/web");
+  assert.equal(dispatch.client_payload.user_prompt, "add admin panel to this. it should be able to view, add, update, delete the post.");
+  assert.ok(postsOf(calls).every(p => !p.text.includes("Clarification")));
+});
+
+test("a coding request naming no repository asks for one, and the reply resumes it there", async () => {
+  const calls = mockServices("CODE_DEVELOPMENT");
+  await run({ type: "app_mention", text: "<@UBOT> add an admin panel", channel: "C1", ts: "400.0" });
+  assert.deepEqual(dispatchesOf(calls), []);
+  const [header, question] = postsOf(calls);
+  assert.equal(header.thread_ts, "400.0");
+  assert.doesNotMatch(header.text, /Repo:/);
+  assert.match(question.text, /Which repository should I work in\?/);
+
+  const thread = [{ ts: "400.0", text: "<@UBOT> add an admin panel" }, { ts: "9.9", bot_id: "B1", text: header.text }];
+  const replyCalls = mockServices("CODE_DEVELOPMENT", thread);
+  await run({ type: "message", text: "acme/web", channel: "C1", ts: "401.0", thread_ts: "400.0" });
+  const [dispatch] = dispatchesOf(replyCalls);
+  assert.equal(dispatch.client_payload.target_repo, "acme/web");
+  assert.match(postsOf(replyCalls)[0].text, /Repo:\* `acme\/web`/);
+});
+
+test("a repository with no instruction asks what to change", async () => {
+  const calls = mockServices("CODE_DEVELOPMENT");
+  await run({ type: "app_mention", text: "<@UBOT> acme/web", channel: "C1", ts: "500.0" });
+  assert.deepEqual(dispatchesOf(calls), []);
+  assert.match(postsOf(calls)[1].text, /What should I change in `acme\/web`\?/);
+});
+
+test("a tagged answer to the repository question resumes the request once", async () => {
+  const thread = [
+    { ts: "400.0", text: "<@UBOT> add an admin panel" },
+    { ts: "400.1", bot_id: "B1", text: "🤖 *Antigravity AI Request Received*\n📌 *Prompt:* `add an admin panel`" },
+  ];
+  const calls = mockServices("CODE_DEVELOPMENT", thread);
+  await run({ type: "app_mention", text: "<@UBOT> acme/web", channel: "C1", ts: "401.0", thread_ts: "400.0" });
+  await run({ type: "message", text: "<@UBOT> acme/web", channel: "C1", ts: "401.0", thread_ts: "400.0" });
+  const dispatches = dispatchesOf(calls);
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].client_payload.target_repo, "acme/web");
+  assert.ok(postsOf(calls).every(p => !p.text.includes("What should I change")));
 });
