@@ -116,6 +116,7 @@ jobs:
           SLACK_CHANNEL: ${{ github.event.inputs.slack_channel || github.event.client_payload.slack_channel }}
           SLACK_THREAD: ${{ github.event.inputs.slack_thread_ts || github.event.client_payload.slack_thread_ts }}
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           uv run python -m automation.preflight
 
@@ -190,7 +191,7 @@ jobs:
           USER_PROMPT: ${{ steps.extract_vars.outputs.user_prompt }}
           MODEL_NAME: ${{ steps.extract_vars.outputs.model }}
           EFFORT_VAL: ${{ steps.extract_vars.outputs.effort }}
-          GEMINI_API_KEY: ${{ secrets.AGY_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           AGY_API_KEY: ${{ secrets.AGY_API_KEY }}
         run: |
           uv run --project .. python -m automation.main

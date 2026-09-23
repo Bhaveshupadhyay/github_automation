@@ -7,10 +7,14 @@ from automation.domain.constants import DEFAULT_GEMINI_MODEL
 logger = logging.getLogger("automation.credentials")
 
 def get_gemini_api_key() -> str:
-    """Scans environment variables and local config for Gemini API key."""
+    """Scans environment variables and local config for Gemini API key.
+
+    GEMINI_API_KEY comes first: AGY_API_KEY authenticates the agy CLI and is not
+    necessarily accepted by the Gemini REST API.
+    """
     for candidate in (
-        os.getenv("AGY_API_KEY"),
         os.getenv("GEMINI_API_KEY"),
+        os.getenv("AGY_API_KEY"),
         os.getenv("ANTIGRAVITY_API_KEY"),
     ):
         env_key = (candidate or "").strip()
