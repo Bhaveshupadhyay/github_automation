@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from automation.domain.qa_target import PullRequestSkipped, QAPlatform, QATargetRegistry
+from automation.domain.qa_target import BackendMode, PullRequestSkipped, QAPlatform, QATargetRegistry
 from automation.services.github_pr_context_service import GitHubPullRequestContextService
 import automation.qa_pr_context_cli as cli
 
@@ -16,7 +16,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = QATargetRegistry.model_validate(
     {
         "targets": {
-            "Acme/Web": {"platform": "web", "backend_repo": "acme/api", "slack_channel": "C123"},
+            "Acme/Web": {
+                "platform": "web",
+                "backend_repo": "acme/api",
+                "backend_default_branch": "develop",
+                "slack_channel": "C123",
+                "dev_api_url": "https://dev-api.acme.test",
+            },
             "acme/app": {"platform": "mobile", "backend_repo": "acme/api"},
         }
     }
@@ -89,6 +95,59 @@ class TestResolve:
             _service(_pr(head_repo="")).resolve("acme/web", 7, QAPlatform.WEB)
 
 
+class TestBackendChoice:
+    """What the requester answered when asked which backend to test against."""
+
+    WEB = REGISTRY.find("acme/web")
+    APP = REGISTRY.find("acme/app")
+
+    def _service(self, pr: dict | None = None) -> GitHubPullRequestContextService:
+        return _service(pr or _pr(head_repo="acme/api"))
+
+    def test_no_choice_resolves_a_branch_automatically(self) -> None:
+        choice = self._service().resolve_backend("", self.WEB)
+        assert choice.mode is BackendMode.AUTO
+        assert choice.repository == "acme/api"
+
+    def test_a_backend_pr_is_tested_at_its_head_commit(self) -> None:
+        choice = self._service().resolve_backend("acme/api#3", self.WEB)
+        assert choice.mode is BackendMode.PULL_REQUEST
+        assert choice.repository == "acme/api"
+        assert choice.ref == "abc1234def"
+        assert choice.label == "acme/api#3 (feat/x)"
+
+    def test_a_fork_backend_pr_is_refused(self) -> None:
+        with pytest.raises(PullRequestSkipped, match="fork"):
+            self._service(_pr(head_repo="mallory/api")).resolve_backend("acme/api#3", self.WEB)
+
+    def test_a_closed_backend_pr_is_refused(self) -> None:
+        with pytest.raises(PullRequestSkipped, match="closed"):
+            self._service(_pr(state="closed", head_repo="acme/api")).resolve_backend("acme/api#3", self.WEB)
+
+    def test_main_uses_the_registered_backends_default_branch(self) -> None:
+        choice = self._service().resolve_backend("main", self.WEB)
+        assert (choice.mode, choice.repository, choice.ref) == (BackendMode.BRANCH, "acme/api", "develop")
+
+    def test_main_of_another_repository(self) -> None:
+        choice = self._service().resolve_backend("main:acme/other-api", self.WEB)
+        assert (choice.repository, choice.ref) == ("acme/other-api", "main")
+
+    def test_dev_points_at_the_configured_dev_apis(self) -> None:
+        choice = self._service().resolve_backend("dev", self.WEB)
+        assert choice.mode is BackendMode.DEV
+        assert choice.api_base_url == "https://dev-api.acme.test"
+        assert choice.repository is None
+
+    def test_dev_without_a_dev_url_is_refused(self) -> None:
+        """Pointing the frontend at a missing URL would fail every journey confusingly."""
+        with pytest.raises(PullRequestSkipped, match="dev_api_url"):
+            self._service().resolve_backend("dev", self.APP)
+
+    def test_an_unknown_choice_is_refused(self) -> None:
+        with pytest.raises(PullRequestSkipped, match="not a backend choice"):
+            self._service().resolve_backend("staging please", self.WEB)
+
+
 class TestCli:
     def _run(self, tmp_path: Path, pr: dict, repository: str = "acme/web") -> tuple[int, dict]:
         config = tmp_path / "targets.json"
@@ -114,6 +173,32 @@ class TestCli:
         assert outputs["backend_repo"] == "acme/api"
         assert outputs["slack_channel"] == "C123"
         assert (tmp_path / "body.txt").read_text(encoding="utf-8") == "Backend: feat/x"
+
+    def test_a_chosen_backend_is_output_and_recorded_for_the_report(self, tmp_path: Path) -> None:
+        config = tmp_path / "targets.json"
+        config.write_text(REGISTRY.model_dump_json(), encoding="utf-8")
+        output = tmp_path / "out.txt"
+        branch = tmp_path / "branch.json"
+        argv = [
+            "qa-pr-context", "--repository", "acme/web", "--pr", "7", "--platform", "web",
+            "--config", str(config), "--backend", "dev", "--branch-result-out", str(branch),
+            "--github-output", str(output),
+        ]
+        with patch.object(sys, "argv", argv), patch(
+            "automation.services.github_pr_context_service.GitHubPullRequestContextService._get",
+            lambda self, url: _pr(),
+        ):
+            assert cli.main() == 0
+        outputs = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
+        assert outputs["backend_mode"] == "dev"
+        assert outputs["dev_api_url"] == "https://dev-api.acme.test"
+        assert outputs["backend_repo"] == ""
+        assert json.loads(branch.read_text(encoding="utf-8"))["resolution_source"] == "dev_api"
+
+    def test_auto_mode_leaves_the_branch_result_to_the_resolver(self, tmp_path: Path) -> None:
+        code, outputs = self._run(tmp_path, _pr())
+        assert outputs["backend_mode"] == "auto"
+        assert not (tmp_path / "branch.json").exists()
 
     def test_skip_is_an_output_not_a_failure(self, tmp_path: Path) -> None:
         code, outputs = self._run(tmp_path, _pr(state="closed"))

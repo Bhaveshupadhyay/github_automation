@@ -216,6 +216,77 @@ class TestLifecycleSupervisor(unittest.TestCase):
         fe_env = fe_call_args.kwargs.get("env") or fe_call_args[0][2]
         self.assertEqual(fe_env.get("NEXT_PUBLIC_API_BASE_URL"), "http://localhost:8000")
 
+    def _frontend_only_supervisor(self):
+        mock_sops = MagicMock(spec=ISOpsService)
+        mock_validator = MagicMock(spec=IQAContractValidatorService)
+        mock_validator.validate_contract_file.return_value = QAContract.model_validate(self.frontend_contract_data)
+        mock_health = MagicMock(spec=IHealthCheckService)
+        mock_health.poll_health.return_value = True
+        mock_tree = MagicMock(spec=IProcessTreeManager)
+        mock_fe_proc = MagicMock()
+        mock_fe_proc.pid = 2002
+        mock_tree.spawn_service_process.return_value = mock_fe_proc
+        supervisor = LifecycleSupervisorService(
+            sops_service=mock_sops,
+            qa_contract_validator=mock_validator,
+            health_check_service=mock_health,
+            process_tree_manager=mock_tree,
+        )
+        return supervisor, mock_sops, mock_tree
+
+    def test_frontend_only_points_at_the_supplied_api(self) -> None:
+        """Dev-API mode: no backend, no decryption, no database — only the frontend,
+        calling the already-deployed API."""
+        supervisor, mock_sops, mock_tree = self._frontend_only_supervisor()
+
+        result = supervisor.start_services(
+            backend_dir=None,
+            frontend_dir=self.frontend_dir,
+            api_base_url_override="https://dev-api.example.com",
+        )
+
+        self.assertTrue(result.success)
+        self.assertIsNone(result.backend_info)
+        self.assertEqual(result.frontend_info.status, ServiceStatus.HEALTHY)
+        mock_sops.decrypt_file.assert_not_called()
+        self.assertEqual(mock_tree.spawn_service_process.call_count, 1)
+        fe_env = mock_tree.spawn_service_process.call_args.kwargs["env"]
+        self.assertEqual(fe_env["NEXT_PUBLIC_API_BASE_URL"], "https://dev-api.example.com")
+
+    def test_frontend_only_requires_an_api_address(self) -> None:
+        """Without one the frontend would silently call an address where nothing listens."""
+        supervisor, _, mock_tree = self._frontend_only_supervisor()
+        result = supervisor.start_services(backend_dir=None, frontend_dir=self.frontend_dir)
+        self.assertFalse(result.success)
+        self.assertIn("API base URL", result.error_message)
+        mock_tree.spawn_service_process.assert_not_called()
+
+    def test_api_override_replaces_the_local_backend_address(self) -> None:
+        (self.backend_dir / ".env.qa.enc").unlink(missing_ok=True)
+        mock_validator = MagicMock(spec=IQAContractValidatorService)
+        mock_validator.validate_contract_file.side_effect = [
+            QAContract.model_validate(self.backend_contract_data),
+            QAContract.model_validate(self.frontend_contract_data),
+        ]
+        mock_health = MagicMock(spec=IHealthCheckService)
+        mock_health.poll_health.return_value = True
+        mock_tree = MagicMock(spec=IProcessTreeManager)
+        mock_tree.spawn_service_process.side_effect = [MagicMock(pid=1), MagicMock(pid=2)]
+        supervisor = LifecycleSupervisorService(
+            sops_service=MagicMock(spec=ISOpsService),
+            qa_contract_validator=mock_validator,
+            health_check_service=mock_health,
+            process_tree_manager=mock_tree,
+        )
+        result = supervisor.start_services(
+            backend_dir=self.backend_dir,
+            frontend_dir=self.frontend_dir,
+            api_base_url_override="https://elsewhere.example.com",
+        )
+        self.assertTrue(result.success)
+        fe_env = mock_tree.spawn_service_process.call_args_list[1].kwargs["env"]
+        self.assertEqual(fe_env["NEXT_PUBLIC_API_BASE_URL"], "https://elsewhere.example.com")
+
     def test_live_concurrent_health_verification(self) -> None:
         """Starts real live HTTP services on separate ports and confirms both return HTTP 200 simultaneously."""
         import sys

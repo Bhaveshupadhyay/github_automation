@@ -29,6 +29,11 @@ on:
         description: "Pull request number."
         type: string
         required: true
+      backend:
+        description: "Backend: empty (resolve automatically), dev, main, main:owner/name, or owner/name#N."
+        type: string
+        required: false
+        default: ""
 
 # Keyed on the pull request, so a new push cancels the run still testing the old commit.
 # `cancel-in-progress` is a capacity control, not a correctness guarantee: a run already
@@ -48,6 +53,8 @@ env:
   # a manual re-run.
   REQUEST_SLACK_CHANNEL: ${{ github.event.client_payload.slack_channel }}
   REQUEST_SLACK_THREAD: ${{ github.event.client_payload.slack_thread_ts }}
+  # What the requester chose to test against: a backend PR, `main`, or the dev APIs.
+  BACKEND_CHOICE: ${{ github.event.client_payload.backend || inputs.backend }}
 
 jobs:
   # Reads the pull request fresh from the API and pairs it with its registered backend.
@@ -62,7 +69,11 @@ jobs:
       head_sha: ${{ steps.pr.outputs.head_sha }}
       base_ref: ${{ steps.pr.outputs.base_ref }}
       backend_repo: ${{ steps.pr.outputs.backend_repo }}
-      backend_branch: ${{ steps.backend_branch.outputs.branch }}
+      backend_mode: ${{ steps.pr.outputs.backend_mode }}
+      # A chosen backend PR or branch, else the branch resolved from the PR.
+      backend_branch: ${{ steps.pr.outputs.backend_ref || steps.backend_branch.outputs.branch }}
+      backend_label: ${{ steps.pr.outputs.backend_label }}
+      dev_api_url: ${{ steps.pr.outputs.dev_api_url }}
       slack_channel: ${{ steps.pr.outputs.slack_channel }}
       db_strategy: ${{ steps.pr.outputs.db_strategy }}
       startup_timeout_seconds: ${{ steps.pr.outputs.startup_timeout_seconds }}
@@ -89,8 +100,13 @@ jobs:
           set -euo pipefail
           # Both values arrive from a dispatch payload or a manual input. They are read
           # from the environment, never interpolated, and validated before any use.
-          if ! [[ "$PR_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+          REPO='[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
+          if ! [[ "$PR_REPOSITORY" =~ ^${REPO}$ ]] || ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
             echo "::error::Invalid dispatch: repository must be owner/name and pr_number a number."
+            exit 1
+          fi
+          if ! [[ "$BACKEND_CHOICE" =~ ^(|dev|main|main:${REPO}|${REPO}#[0-9]+)$ ]]; then
+            echo "::error::Invalid dispatch: backend must be empty, dev, main, main:owner/name or owner/name#N."
             exit 1
           fi
           mkdir -p qa-results
@@ -98,6 +114,8 @@ jobs:
             --repository "$PR_REPOSITORY" \
             --pr "$PR_NUMBER" \
             --platform web \
+            --backend "$BACKEND_CHOICE" \
+            --branch-result-out qa-results/branch.json \
             --body-file qa-results/pr-body.txt
 
       - name: Explain why no preview was produced
@@ -132,7 +150,7 @@ jobs:
       # remote head, then the registered default branch.
       - name: Resolve the backend branch
         id: backend_branch
-        if: steps.pr.outputs.skip == 'false'
+        if: steps.pr.outputs.skip == 'false' && steps.pr.outputs.backend_mode == 'auto'
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -158,6 +176,7 @@ jobs:
           name: qa-context-${{ github.run_id }}
           path: qa-results/branch.json
           retention-days: 1
+          if-no-files-found: ignore
 
   # Runs the pull request's code. Holds no token that can write to the pull request and
   # no storage credential: those belong to `publish`, on a separate runner.
@@ -236,6 +255,7 @@ jobs:
           fi
 
       - name: Checkout backend at the resolved branch
+        if: needs.resolve.outputs.backend_mode != 'dev'
         uses: actions/checkout@v4
         with:
           repository: ${{ needs.resolve.outputs.backend_repo }}
@@ -245,6 +265,7 @@ jobs:
           path: backend
 
       - name: Check backend secret drift
+        if: needs.resolve.outputs.backend_mode != 'dev'
         working-directory: backend
         run: |
           if [ -f .env.example ]; then
@@ -256,6 +277,7 @@ jobs:
       # 3. Fail fast on a missing key or an undecryptable file, before minutes of
       #    startup. Nothing is exported: the supervisor decrypts for the services itself.
       - name: Decrypt the QA environment
+        if: needs.resolve.outputs.backend_mode != 'dev'
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
@@ -282,13 +304,21 @@ jobs:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
           DB_STRATEGY: ${{ needs.resolve.outputs.db_strategy }}
           STARTUP_TIMEOUT: ${{ needs.resolve.outputs.startup_timeout_seconds }}
+          BACKEND_MODE: ${{ needs.resolve.outputs.backend_mode }}
+          DEV_API_URL: ${{ needs.resolve.outputs.dev_api_url }}
         run: |
           set -euo pipefail
           mkdir -p "$RESULTS_DIR"
           READY_FILE="$RUNNER_TEMP/qa-ready"
           rm -f "$READY_FILE"
+          # Against the dev APIs only the frontend runs, pointed at them; otherwise the
+          # cloned backend is started and the frontend is pointed at it.
+          BACKEND_ARGS=(--backend-dir "$BACKEND_DIR")
+          if [ "$BACKEND_MODE" = "dev" ]; then
+            BACKEND_ARGS=(--no-backend --api-base-url "$DEV_API_URL")
+          fi
           nohup uv run --project "$TOOLING_DIR" qa-lifecycle \
-            --backend-dir "$BACKEND_DIR" \
+            "${BACKEND_ARGS[@]}" \
             --frontend-dir "$FRONTEND_DIR" \
             --db-strategy "$DB_STRATEGY" \
             --result-json "$RESULTS_DIR/lifecycle.json" \

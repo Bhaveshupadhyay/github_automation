@@ -2,14 +2,18 @@
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import Any, Optional
 
 from automation.domain.qa_target import (
+    BackendChoice,
+    BackendMode,
     PullRequestContext,
     PullRequestSkipped,
     QAPlatform,
+    QATarget,
     QATargetRegistry,
 )
 from automation.interfaces.pr_context_interface import IPullRequestContextService
@@ -18,6 +22,10 @@ logger = logging.getLogger("automation.pr_context")
 
 GITHUB_API_BASE = "https://api.github.com"
 REQUEST_TIMEOUT_SECONDS = 15
+
+REPO = r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
+BACKEND_PR_SPEC = re.compile(rf"^({REPO})#(\d+)$")
+BACKEND_MAIN_SPEC = re.compile(rf"^main(?::({REPO}))?$")
 
 
 class GitHubPullRequestContextService(IPullRequestContextService):
@@ -66,6 +74,20 @@ class GitHubPullRequestContextService(IPullRequestContextService):
                 f"{repository} is registered for the {target.platform.value} pipeline, not {platform.value}."
             )
 
+        pr = self._fetch_runnable_pr(repository, pr_number)
+
+        return PullRequestContext(
+            repository=repository,
+            number=pr_number,
+            head_sha=pr["head"]["sha"],
+            head_ref=pr["head"]["ref"],
+            base_ref=pr["base"]["ref"],
+            body=pr.get("body") or "",
+            target=target,
+        )
+
+    def _fetch_runnable_pr(self, repository: str, pr_number: int) -> dict:
+        """Fetch a pull request whose code may run here: open, and not from a fork."""
         pr = self._get(f"{self._api_base}/repos/{repository}/pulls/{pr_number}")
 
         if pr.get("state") != "open":
@@ -79,13 +101,44 @@ class GitHubPullRequestContextService(IPullRequestContextService):
                 f"{repository}#{pr_number} comes from a fork ({head_repo or 'deleted repository'}); "
                 "fork code is never run with this repository's secrets."
             )
+        return pr
 
-        return PullRequestContext(
-            repository=repository,
-            number=pr_number,
-            head_sha=pr["head"]["sha"],
-            head_ref=pr["head"]["ref"],
-            base_ref=pr["base"]["ref"],
-            body=pr.get("body") or "",
-            target=target,
-        )
+    def resolve_backend(self, spec: str, target: QATarget) -> BackendChoice:
+        spec = (spec or "").strip()
+
+        if not spec:
+            return BackendChoice(mode=BackendMode.AUTO, repository=target.backend_repo)
+
+        if spec.lower() == "dev":
+            if not target.dev_api_url:
+                raise PullRequestSkipped(
+                    "the dev APIs are not configured for this repository. Set `dev_api_url` "
+                    "in contracts/qa-targets.json, or choose a backend PR or `main`."
+                )
+            return BackendChoice(
+                mode=BackendMode.DEV,
+                label=f"dev APIs ({target.dev_api_url})",
+                api_base_url=target.dev_api_url,
+            )
+
+        main = BACKEND_MAIN_SPEC.match(spec)
+        if main:
+            repository = main.group(1) or target.backend_repo
+            # The registered backend's own default branch; any other repository's `main`.
+            branch = target.backend_default_branch if repository.lower() == target.backend_repo.lower() else "main"
+            return BackendChoice(
+                mode=BackendMode.BRANCH, repository=repository, ref=branch, label=f"{repository}@{branch}"
+            )
+
+        pull = BACKEND_PR_SPEC.match(spec)
+        if pull:
+            repository, number = pull.group(1), int(pull.group(2))
+            pr = self._fetch_runnable_pr(repository, number)
+            return BackendChoice(
+                mode=BackendMode.PULL_REQUEST,
+                repository=repository,
+                ref=pr["head"]["sha"],
+                label=f"{repository}#{number} ({pr['head']['ref']})",
+            )
+
+        raise PullRequestSkipped(f"'{spec}' is not a backend choice. Use a backend PR, `main`, or `dev`.")

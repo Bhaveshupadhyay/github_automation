@@ -135,7 +135,7 @@ export default {
 
           // Case A: Thread Reply Clarification
           if (event.type === "message" && event.thread_ts && event.text) {
-            ctx.waitUntil(handleSlackThreadReply(event, env, intentService, slackService, githubService));
+            ctx.waitUntil(handleSlackThreadReply(event, env, intentService, slackService, githubService, qaRequestService));
             return new Response("OK", { status: 200 });
           }
 
@@ -172,6 +172,11 @@ async function handleCommandOrMention(text, channelId, userId, threadTs, parentT
   if (!repo) {
     console.error("No target repository configured or specified.");
     await slackService.postMessage(channelId, "⚠️ *Error:* No target repository specified or configured.", threadTs);
+    return;
+  }
+
+  // A tagged answer to the bot's backend question is handled by the thread-reply path.
+  if (await qaRequestService.pendingQuestion(channelId, parentThreadTs, threadTs)) {
     return;
   }
 
@@ -228,10 +233,16 @@ async function handleCommandOrMention(text, channelId, userId, threadTs, parentT
 /**
  * Handles Thread Replies when user replies with requested clarification.
  */
-async function handleSlackThreadReply(event, env, intentService, slackService, githubService) {
+async function handleSlackThreadReply(event, env, intentService, slackService, githubService, qaRequestService) {
   const channelId = event.channel;
   const threadTs = event.thread_ts;
   const userReply = event.text;
+
+  // An answer to "which backend should QA run against?", tagged or not. Handled here
+  // only, since Slack also delivers a tagged reply as an app_mention.
+  if (await qaRequestService.handleBackendAnswer({ text: userReply, channelId, threadTs, messageTs: event.ts })) {
+    return;
+  }
 
   // Retrieve parent thread message context from Slack
   const { parentRepo, parentPrompt } = await slackService.fetchThreadParent(channelId, threadTs);

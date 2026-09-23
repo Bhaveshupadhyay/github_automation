@@ -170,6 +170,39 @@ class TestSlackRoundTrip(unittest.TestCase):
                 self.assertIn("chat.postMessage", explain["run"])
 
 
+class TestBackendChoice(unittest.TestCase):
+    """The requester chooses the backend: a backend PR, a repository's main, or the dev APIs."""
+
+    def test_the_choice_is_validated_and_passed_to_the_resolver(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                self.assertIn("client_payload.backend", document["env"]["BACKEND_CHOICE"])
+                self.assertIn("backend", _triggers(document)["workflow_dispatch"]["inputs"])
+                run = _step(_job(document, "resolve"), "Resolve the pull request")["run"]
+                self.assertIn('--backend "$BACKEND_CHOICE"', run)
+                self.assertIn('[[ "$BACKEND_CHOICE" =~', run)
+
+    def test_the_branch_resolver_runs_only_when_nothing_was_chosen(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                resolver = _step(_job(document, "resolve"), "Resolve the backend branch")
+                self.assertIn("backend_mode == 'auto'", resolver["if"])
+                # A chosen PR or branch wins over the resolver's branch.
+                self.assertIn("steps.pr.outputs.backend_ref ||", _job(document, "resolve")["outputs"]["backend_branch"])
+
+    def test_dev_mode_never_clones_or_decrypts_a_backend(self) -> None:
+        for name, _, document in _workflows():
+            job = _job(document, "qa-preview")
+            for fragment in ("Checkout backend", "Check backend secret drift", "Decrypt the QA environment"):
+                with self.subTest(workflow=name, step=fragment):
+                    self.assertIn("backend_mode != 'dev'", _step(job, fragment)["if"])
+
+    def test_web_dev_mode_starts_only_the_frontend_against_the_dev_apis(self) -> None:
+        job = _job(_load(WORKFLOW_DIR / "qa-web-preview.yml"), "qa-preview")
+        start = _step(job, "await health")
+        self.assertIn("--no-backend --api-base-url \"$DEV_API_URL\"", start["run"])
+
+
 class TestSecretIsolation(unittest.TestCase):
     """The pull request's code must never share a runner with credentials that can
     write to it: a malicious step could read them from a later step's process."""

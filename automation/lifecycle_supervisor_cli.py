@@ -24,6 +24,16 @@ def main() -> None:
         help="Path to backend repository directory containing qa-contract.json (default: .)",
     )
     parser.add_argument(
+        "--no-backend",
+        action="store_true",
+        help="Start only the frontend, pointed at --api-base-url (e.g. deployed dev APIs).",
+    )
+    parser.add_argument(
+        "--api-base-url",
+        default=None,
+        help="API address given to the frontend instead of the locally started backend.",
+    )
+    parser.add_argument(
         "--frontend-dir",
         default=None,
         help="Optional path to frontend repository directory containing qa-contract.json",
@@ -110,11 +120,13 @@ def main() -> None:
             )
             db_strategy = get_database_strategy(cfg)
 
-        backend_p = Path(args.backend_dir).resolve()
+        backend_p = None if args.no_backend else Path(args.backend_dir).resolve()
         frontend_p = Path(args.frontend_dir).resolve() if args.frontend_dir else None
 
         print(f"🚀 Starting Lifecycle Supervisor...")
-        print(f"   - Backend Dir: {backend_p}")
+        print(f"   - Backend Dir: {backend_p or 'none (frontend only)'}")
+        if args.api_base_url:
+            print(f"   - API Base URL: {args.api_base_url}")
         if frontend_p:
             print(f"   - Frontend Dir: {frontend_p}")
         if args.db_strategy:
@@ -127,6 +139,7 @@ def main() -> None:
             sops_age_key=args.sops_age_key,
             backend_health_timeout=args.backend_timeout,
             frontend_health_timeout=args.frontend_timeout,
+            api_base_url_override=args.api_base_url,
         )
     except Exception as e:
         result = LifecycleResult(

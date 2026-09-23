@@ -26,6 +26,9 @@ RESOLUTION_LABELS = {
     ResolutionSource.AI_SEMANTIC_EXTRACTION: "inferred from the PR description",
     ResolutionSource.REMOTE_BRANCH_MATCH: "matched by branch name",
     ResolutionSource.DEFAULT_FALLBACK: "default fallback",
+    ResolutionSource.REQUESTED_PULL_REQUEST: "backend pull request chosen in Slack",
+    ResolutionSource.REQUESTED_BRANCH: "chosen in Slack",
+    ResolutionSource.DEV_API: "deployed dev APIs, no backend started",
 }
 
 

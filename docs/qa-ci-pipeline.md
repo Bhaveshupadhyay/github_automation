@@ -12,18 +12,26 @@ The repositories under test hold no workflow file and no secret. Everything — 
 pipeline, its secrets, its runs and its logs — lives here.
 
 ```
-@bot run QA on this            (in the thread where the bot opened the PR)
-@bot test owner/repo#12        (or any PR, by link or owner/repo#N)
-  → Cloudflare Worker classifies the request as QA_TESTING (Gemini)
-  → finds the PR: named in the message, else the latest PR linked in the thread
+@bot target repo: owner/frontend  add an admin panel…   → the bot opens a frontend PR
+@bot run QA on this                                      (in that thread)
+  → Worker classifies the request as QA_TESTING and finds the frontend PR
+  → bot: "which backend should it run against?"
+      owner/backend#8 (or its link)   → the backend PR's branch, run in the runner
+      main  (or `main owner/repo`)    → that backend's main branch, run in the runner
+      dev                             → the deployed dev APIs; no backend is started
   → repository_dispatch `qa_<platform>_preview` on github_automation
   → resolve → qa-preview → publish, all in github_automation's Actions
-  → PR branch cloned at its head commit, tests generated, run and recorded
+  → frontend PR branch cloned at its head commit, pointed at the chosen backend
+  → tests generated from the diff, run and recorded
   → one comment on the pull request, media in R2, reply in the Slack thread
 ```
 
-With no PR named and none in the thread, the bot asks which one to test. A thread reply
-that asks for QA without tagging the bot is ignored rather than resuming the coding run.
+The frontend PR is the one named in the message, else the latest registered PR linked in
+the thread. A request that names a backend PR too (`@bot test owner/web#5 against
+owner/api#8`) starts at once. Answering "no backend PR" gets the `main` and `dev` options;
+an unrecognised answer gets the question again. The answer may be tagged or not, but a
+QA request itself only counts when the bot is tagged, and a QA reply never resumes the
+coding run.
 
 | File | Purpose |
 | :--- | :--- |
@@ -37,7 +45,7 @@ Each workflow also has a `workflow_dispatch` trigger, for re-running a pull requ
 after updating its backend branch or fixing a broken test (Phase 7.3):
 
 ```bash
-gh workflow run qa-web-preview.yml -f repository=owner/frontend -f pr_number=42
+gh workflow run qa-web-preview.yml -f repository=owner/frontend -f pr_number=42 -f backend=owner/backend#8
 ```
 
 ## Registering a repository
@@ -62,6 +70,7 @@ Add it to `contracts/qa-targets.json`:
 | `platform` | — | `web` or `mobile`: which pipeline runs |
 | `backend_repo` | — | Backend paired with this repository |
 | `backend_default_branch` | `main` | Used when the PR declares no backend branch and no head matches |
+| `dev_api_url` | none | Deployed dev API base URL for the `dev` answer. Unset, `dev` is refused with a reason |
 | `slack_channel` | none | Slack channel for a manual re-run's result. A Slack request replies in its own thread |
 | `db_strategy` | `auto` | `auto`, `cloud_dev` or `ephemeral_container` |
 | `startup_timeout_seconds` | `420` | Budget for install, migrations and health probes |
@@ -77,16 +86,20 @@ repositories need a `qa-contract.json`: those describe the application, not the 
 ## Jobs
 
 **`resolve`** reads the pull request from the API — the dispatch payload carries only a
-repository and a number — and refuses it when it is unregistered, closed, or from a fork.
-It then resolves the backend branch (explicit declaration → matching remote head → default).
+repository, a number and the backend choice — and refuses it when it is unregistered,
+closed, or from a fork. A backend PR gets the same open/fork check and is checked out at
+its head commit. With no choice (a manual re-run without `backend`), the backend branch is
+resolved from the PR (explicit declaration → matching remote head → default).
 
 **`qa-preview`** runs the pull request's code:
 
 1. Checkout the PR head commit with full history, and this repository's tooling.
 2. Install SOPS and age; key-drift check on the frontend.
-3. Checkout the backend at the resolved branch; key-drift check on the backend.
+3. Checkout the backend at the chosen PR or branch; key-drift check on the backend.
 4. Check that `.env.qa.enc` decrypts, failing fast on a bad key. Nothing is exported.
-5. Start the database, backend and frontend; wait for both health probes.
+5. Start the database, backend and frontend, with the frontend's `apiBaseUrlEnvVar`
+   pointed at the backend; wait for both health probes. With `dev`, steps 3–4 are skipped
+   and only the frontend starts, pointed at `dev_api_url`.
 6. Generate the test plan from the diff, reusing the cached plan when unchanged.
 7. Execute the journeys, recording video; compress it and build the preview GIF.
 8. Hand the results to `publish` as an artifact; stop the services; re-assert the verdict.

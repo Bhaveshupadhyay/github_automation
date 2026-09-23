@@ -1,8 +1,12 @@
 """CLI entry point resolving the pull request a central QA run was dispatched for.
 
 Usage:
-    qa-pr-context --repository owner/name --pr 42 --platform web \
-        [--config contracts/qa-targets.json] [--body-file pr-body.txt] [--github-output $GITHUB_OUTPUT]
+    qa-pr-context --repository owner/name --pr 42 --platform web [--backend SPEC] \
+        [--config contracts/qa-targets.json] [--body-file pr-body.txt] \
+        [--branch-result-out branch.json] [--github-output $GITHUB_OUTPUT]
+
+--backend is the requester's choice: empty (resolve a backend branch automatically),
+`dev` (the deployed dev APIs), `main`, `main:owner/name`, or `owner/name#N` (a backend PR).
 
 Writes the resolved context as `key=value` lines to --github-output (stdout when unset),
 and the PR description to --body-file. A pull request that must not be previewed is not
@@ -34,6 +38,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--platform", required=True, choices=["web", "mobile"], help="Pipeline being run.")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Path to the QA target registry.")
     parser.add_argument("--body-file", default=None, help="Where to write the PR description.")
+    parser.add_argument("--backend", default="", help="Backend choice: '', dev, main, main:owner/name, owner/name#N.")
+    parser.add_argument(
+        "--branch-result-out",
+        default=None,
+        help="Where to write the backend choice as a branch resolution, for the report. Not written in auto mode.",
+    )
     parser.add_argument("--github-output", default=os.getenv("GITHUB_OUTPUT"), help="Step output file.")
     return parser
 
@@ -56,7 +66,8 @@ def main() -> int:
     args = _build_parser().parse_args()
 
     from automation.core import get_pr_context_service
-    from automation.domain.qa_target import PullRequestSkipped, QAPlatform, QATargetRegistry
+    from automation.domain.branch_resolver import BranchResolutionResult, ResolutionSource
+    from automation.domain.qa_target import BackendMode, PullRequestSkipped, QAPlatform, QATargetRegistry
 
     try:
         registry = QATargetRegistry.model_validate(json.loads(Path(args.config).read_text(encoding="utf-8")))
@@ -67,6 +78,7 @@ def main() -> int:
     service = get_pr_context_service(registry)
     try:
         context = service.resolve(args.repository, args.pr, QAPlatform(args.platform))
+        backend = service.resolve_backend(args.backend, context.target)
     except PullRequestSkipped as e:
         logger.warning(f"Skipping: {e}")
         _write_outputs({"skip": "true", "skip_reason": str(e)}, args.github_output)
@@ -80,15 +92,34 @@ def main() -> int:
         Path(args.body_file).write_text(context.body, encoding="utf-8")
 
     target = context.target
+    if args.branch_result_out and backend.mode is not BackendMode.AUTO:
+        source = {
+            BackendMode.PULL_REQUEST: ResolutionSource.REQUESTED_PULL_REQUEST,
+            BackendMode.BRANCH: ResolutionSource.REQUESTED_BRANCH,
+            BackendMode.DEV: ResolutionSource.DEV_API,
+        }[backend.mode]
+        result = BranchResolutionResult(
+            target_branch=backend.label,
+            target_repo_url=f"https://github.com/{backend.repository}.git" if backend.repository else backend.api_base_url or "",
+            source_branch=context.head_ref,
+            resolution_source=source,
+        )
+        Path(args.branch_result_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.branch_result_out).write_text(result.model_dump_json(indent=2), encoding="utf-8")
+
     _write_outputs(
         {
             "skip": "false",
+            "backend_mode": backend.mode.value,
+            "backend_ref": backend.ref or "",
+            "backend_label": backend.label,
+            "dev_api_url": backend.api_base_url or "",
             "repository": context.repository,
             "pr_number": str(context.number),
             "head_sha": context.head_sha,
             "head_ref": context.head_ref,
             "base_ref": context.base_ref,
-            "backend_repo": target.backend_repo,
+            "backend_repo": backend.repository or "",
             "backend_default_branch": target.backend_default_branch,
             "slack_channel": target.slack_channel or "",
             "db_strategy": target.db_strategy,
@@ -104,7 +135,7 @@ def main() -> int:
     )
     logger.info(
         f"Resolved {context.repository}#{context.number} at {context.head_sha[:7]} "
-        f"against {target.backend_repo}."
+        f"against {backend.label or backend.repository} ({backend.mode.value})."
     )
     return 0
 

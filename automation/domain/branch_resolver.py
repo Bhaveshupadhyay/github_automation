@@ -10,6 +10,9 @@ class ResolutionSource(str, Enum):
     AI_SEMANTIC_EXTRACTION = "ai_semantic_extraction"
     REMOTE_BRANCH_MATCH = "remote_branch_match"
     DEFAULT_FALLBACK = "default_fallback"
+    REQUESTED_PULL_REQUEST = "requested_pull_request"
+    REQUESTED_BRANCH = "requested_branch"
+    DEV_API = "dev_api"
 
 
 class AIExtractedBranch(BaseModel):
