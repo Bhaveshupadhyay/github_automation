@@ -16,6 +16,7 @@ TEMPLATE_DIR = REPO_ROOT / "contracts" / "templates" / "workflows"
 
 REUSABLE_WORKFLOWS = ["qa-web-preview.yml", "qa-mobile-preview.yml"]
 CALLER_TEMPLATES = ["qa-web-preview.caller.yml", "qa-mobile-preview.caller.yml"]
+R2_SECRETS = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_PUBLIC_BASE_URL"]
 
 
 def _load(path: Path) -> dict:
@@ -68,12 +69,34 @@ class TestReusableContract(unittest.TestCase):
                 self.assertEqual(list(triggers.keys()), ["workflow_call"])
 
     def test_sops_age_key_is_the_only_required_secret(self) -> None:
-        """Directive: GitHub Actions holds exactly one application secret."""
+        """Directive: a caller needs exactly one secret to run the pipeline."""
         for name in REUSABLE_WORKFLOWS:
             with self.subTest(workflow=name):
                 secrets = _triggers(_load(WORKFLOW_DIR / name))["workflow_call"]["secrets"]
                 required = [key for key, spec in secrets.items() if spec.get("required")]
                 self.assertEqual(required, ["SOPS_AGE_KEY"])
+
+    def test_storage_credentials_are_accepted_as_optional_secrets(self) -> None:
+        """R2 credentials may come from GitHub secrets instead of .env.qa.enc."""
+        for name in REUSABLE_WORKFLOWS:
+            with self.subTest(workflow=name):
+                secrets = _triggers(_load(WORKFLOW_DIR / name))["workflow_call"]["secrets"]
+                for key in R2_SECRETS:
+                    self.assertIn(key, secrets)
+                    self.assertFalse(secrets[key].get("required"))
+
+    def test_storage_secrets_are_exported_after_decryption_and_before_publishing(self) -> None:
+        """Exported before decryption, a value from .env.qa.enc would silently override
+        the GitHub secret; exported after publishing, it would never be used."""
+        for name in REUSABLE_WORKFLOWS:
+            job = _preview_job(_load(WORKFLOW_DIR / name))
+            with self.subTest(workflow=name):
+                export = _step_index(job, "storage credentials from GitHub secrets")
+                self.assertGreater(export, _step_index(job, "Decrypt the QA environment"))
+                self.assertLess(export, _step_index(job, "Publish the QA comment"))
+                step_env = job["steps"][export]["env"]
+                for key in R2_SECRETS:
+                    self.assertEqual(step_env[key], f"${{{{ secrets.{key} }}}}")
 
     def test_the_tooling_checkout_defaults_to_this_workflows_own_commit(self) -> None:
         """A caller pinned to a branch must get that branch's CLIs. Defaulting to `main`
@@ -333,6 +356,8 @@ class TestCallerTemplates(unittest.TestCase):
                 job = _load(TEMPLATE_DIR / template)["jobs"]["qa"]
                 self.assertIn(f".github/workflows/{workflow}@", job["uses"])
                 self.assertIn("SOPS_AGE_KEY", job["secrets"])
+                for key in R2_SECRETS:
+                    self.assertIn(key, job["secrets"])
                 self.assertIn("backend-repo", job["with"])
 
     def test_templates_trigger_on_the_pull_request_events_that_change_code(self) -> None:

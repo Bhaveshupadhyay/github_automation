@@ -61,7 +61,7 @@ on:
         default: 25
     secrets:
       SOPS_AGE_KEY:
-        description: "The one application secret in GitHub Actions. Decrypts .env.qa.enc."
+        description: "Decrypts .env.qa.enc, the backend environment for the run."
         required: true
       GEMINI_API_KEY:
         description: "Diff analysis. Absent, test generation falls back to the baseline flows."
@@ -71,6 +71,21 @@ on:
         required: false
       SLACK_BOT_TOKEN:
         description: "Slack thread reply. Skipped entirely when unset."
+        required: false
+      R2_ACCOUNT_ID:
+        description: "Cloudflare account for R2. Overrides the value in .env.qa.enc."
+        required: false
+      R2_ACCESS_KEY_ID:
+        description: "R2 access key. Overrides the value in .env.qa.enc."
+        required: false
+      R2_SECRET_ACCESS_KEY:
+        description: "R2 secret key. Overrides the value in .env.qa.enc."
+        required: false
+      R2_BUCKET:
+        description: "R2 bucket for QA media. Overrides the value in .env.qa.enc."
+        required: false
+      R2_PUBLIC_BASE_URL:
+        description: "Public origin of the R2 bucket. Overrides the value in .env.qa.enc."
         required: false
 
 concurrency:
@@ -274,6 +289,24 @@ jobs:
             echo "::add-mask::$value"
             echo "$key=$value" >> "$GITHUB_ENV"
           done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$RUNNER_TEMP/qa.env" || true)
+
+      # Storage credentials may instead live in GitHub Actions secrets. Runs after the
+      # decryption so a secret overrides the same key from .env.qa.enc; an unset secret
+      # leaves the decrypted value in place. GitHub masks secret values on its own.
+      - name: Export storage credentials from GitHub secrets
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+        run: |
+          set -euo pipefail
+          for key in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_PUBLIC_BASE_URL; do
+            value="${!key:-}"
+            [ -n "$value" ] || continue
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
 
       # Only the backend runs under the supervisor here; the app under test is a binary
       # installed on the emulator rather than a served process.

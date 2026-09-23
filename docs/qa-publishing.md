@@ -12,8 +12,10 @@ media produced by Phase 4, hosts it, and reports the outcome on the pull request
 
 ## Configuration
 
-Storage credentials are read from the environment. In CI they arrive via SOPS decryption of
-`.env.qa.enc`, so `SOPS_AGE_KEY` remains the only secret stored in GitHub Actions.
+Storage credentials are read from the environment. In CI they arrive from either of two
+sources: GitHub Actions secrets named after the `R2_*` variables below, or SOPS decryption of
+`.env.qa.enc`. A GitHub secret overrides the same key from the encrypted file, and an unset
+secret leaves the decrypted value in place. `R2_ENDPOINT_URL` is read from `.env.qa.enc` only.
 
 | Variable | Required | Purpose |
 | :--- | :--- | :--- |

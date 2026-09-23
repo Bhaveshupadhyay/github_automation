@@ -101,8 +101,9 @@ plan is regenerated even when the diff content already has an entry.
 
 ## Secrets
 
-`SOPS_AGE_KEY` is the only required secret and the only application secret in GitHub
-Actions. Everything else is decrypted from the `.env.qa.enc` committed beside the code.
+`SOPS_AGE_KEY` is the only required secret. The backend environment is decrypted from the
+`.env.qa.enc` committed beside the code. Cloudflare R2 credentials can live either there or
+in GitHub Actions secrets; when both are set, the GitHub secret wins.
 
 | Secret | Required | Absent behaviour |
 | :--- | :--- | :--- |
@@ -110,6 +111,7 @@ Actions. Everything else is decrypted from the `.env.qa.enc` committed beside th
 | `GEMINI_API_KEY` | No | Test generation falls back to the baseline smoke suite |
 | `BACKEND_TOKEN` | No | Falls back to the workflow token; needed when the backend is private |
 | `SLACK_BOT_TOKEN` | No | Slack notification skipped entirely |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL` | No | Falls back to the `R2_*` keys in `.env.qa.enc`, then to workflow artifacts |
 
 ## Running the pieces locally
 
