@@ -20,7 +20,8 @@ PROSE_SLASH_BLACKLIST = {
 
 def _get_api_key() -> str:
     """Helper to retrieve Gemini API key without circular imports."""
-    for key_name in ("AGY_API_KEY", "GEMINI_API_KEY", "ANTIGRAVITY_API_KEY"):
+    # GEMINI_API_KEY first: AGY_API_KEY authenticates the agy CLI, not the Gemini REST API.
+    for key_name in ("GEMINI_API_KEY", "AGY_API_KEY", "ANTIGRAVITY_API_KEY"):
         val = os.getenv(key_name, "").strip()
         if val:
             return val
