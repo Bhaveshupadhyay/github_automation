@@ -90,10 +90,9 @@ def main():
     result: MediaProcessingResult | None = None
 
     if not service.is_ffmpeg_available():
-        logger.error(
-            "FFmpeg is not installed or not on PATH. "
-            "Install FFmpeg: https://ffmpeg.org/download.html"
-        )
+        message = "FFmpeg is not installed or not on PATH. Install FFmpeg: https://ffmpeg.org/download.html"
+        logger.error(message)
+        _write_result_json(args.result_json, MediaProcessingResult(success=False, error_message=message))
         return 1
 
     logger.info(f"Input: {input_path}")
@@ -111,6 +110,7 @@ def main():
             )
         except Exception as e:
             logger.error(f"❌ Compression failed: {e}")
+            _write_result_json(args.result_json, MediaProcessingResult(success=False, error_message=str(e)))
             return 1
 
     elif args.gif_only:
@@ -130,6 +130,7 @@ def main():
             )
         except Exception as e:
             logger.error(f"❌ GIF generation failed: {e}")
+            _write_result_json(args.result_json, MediaProcessingResult(success=False, error_message=str(e)))
             return 1
 
     else:
@@ -163,6 +164,7 @@ def main():
 
         except Exception as e:
             logger.error(f"❌ Media processing failed: {e}")
+            _write_result_json(args.result_json, MediaProcessingResult(success=False, error_message=str(e)))
             return 1
 
     _write_result_json(args.result_json, result)

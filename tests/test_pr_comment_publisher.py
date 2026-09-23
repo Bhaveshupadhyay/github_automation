@@ -170,6 +170,79 @@ class TestAuthorshipVerification:
         assert result.created is True
 
 
+class TestIdentityVerification:
+    """Deleting another account's comment is worse than leaving a duplicate."""
+
+    def test_actions_identity_is_assumed_when_user_endpoint_is_blocked(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        fake = FakeGitHub(user_endpoint_allowed=False)
+        publisher = build_publisher(fake)
+
+        assert publisher._resolve_bot_login() == "github-actions[bot]"
+        assert publisher._identity_verified is True
+
+    def test_unverified_identity_does_not_delete_duplicates(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        fake = FakeGitHub(user_endpoint_allowed=False)
+        other_bot = fake.add_comment(f"{COMMENT_MARKER}\nfrom another bot", login="some-bot", user_type="Bot")
+        fake.add_comment(f"{COMMENT_MARKER}\nrun 1", login="another-bot", user_type="Bot")
+        publisher = build_publisher(fake)
+
+        result = publisher.upsert_comment("acme/web", 42, "run 2")
+
+        assert result.duplicates_removed == 0
+        assert any(c["id"] == other_bot["id"] for c in fake.comments), "Another bot's comment must survive"
+
+    def test_verified_identity_still_deletes_duplicates(self):
+        fake = FakeGitHub()
+        fake.add_comment(f"{COMMENT_MARKER}\nrun A")
+        fake.add_comment(f"{COMMENT_MARKER}\nrun B")
+        publisher = build_publisher(fake, bot_login=BOT_LOGIN)
+
+        result = publisher.upsert_comment("acme/web", 42, "run C")
+
+        assert result.duplicates_removed == 1
+
+    def test_configured_login_is_treated_as_verified(self):
+        publisher = GitHubPRCommentPublisher(token="t", bot_login="my-bot")
+
+        assert publisher._identity_verified is True
+
+
+class TestCreateRace:
+    """Read-then-create is not atomic, so the invariant is restored after the write."""
+
+    def test_comment_created_concurrently_is_collapsed_after_create(self):
+        fake = FakeGitHub()
+        publisher = build_publisher(fake, bot_login=BOT_LOGIN)
+        original_request = fake.request
+        injected: dict = {}
+
+        def racing_request(method, url, payload=None):
+            result = original_request(method, url, payload)
+            # Simulate a second run posting its own comment between our read and write.
+            if method == "POST" and not injected:
+                injected["comment"] = fake.add_comment(f"{COMMENT_MARKER}\nfrom the racing run")
+            return result
+
+        publisher._request = racing_request  # type: ignore[method-assign]
+        result = publisher.upsert_comment("acme/web", 42, f"{COMMENT_MARKER}\nour run")
+
+        assert result.created is True
+        assert result.duplicates_removed == 1
+        assert len(fake.bot_comments) == 1, "One comment must remain once the call returns"
+        assert fake.bot_comments[0]["id"] == result.comment_id
+
+    def test_no_extra_read_when_nothing_raced(self):
+        fake = FakeGitHub()
+        publisher = build_publisher(fake, bot_login=BOT_LOGIN)
+
+        result = publisher.upsert_comment("acme/web", 42, "run 1")
+
+        assert result.duplicates_removed == 0
+        assert len(fake.bot_comments) == 1
+
+
 class TestPagination:
     """A first-page-only lookup silently posts duplicates on busy pull requests."""
 

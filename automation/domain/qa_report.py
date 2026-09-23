@@ -49,3 +49,28 @@ class QAReport(BaseModel):
     def failed_cases(self) -> list:
         """Failing journeys, which drive the diagnostic section of the comment."""
         return [c for c in self.test_result.test_results if c.outcome is TestOutcome.FAILED]
+
+    @property
+    def artifacts(self) -> list[UploadedArtifact]:
+        """Every piece of media that was successfully published."""
+        return [a for a in (self.video, self.gif, self.trace) if a is not None]
+
+    @property
+    def artifact_providers(self) -> set[StorageProviderType]:
+        """Backends that actually served this report's media.
+
+        Derived from the artifacts themselves rather than a single last-used value,
+        because one upload can fall back while a later one succeeds on the primary.
+        """
+        return {a.provider for a in self.artifacts}
+
+    @property
+    def all_media_degraded(self) -> bool:
+        """True when every published artifact came from the fallback backend."""
+        providers = self.artifact_providers
+        return bool(providers) and providers == {StorageProviderType.GITHUB_ARTIFACT}
+
+    @property
+    def any_media_degraded(self) -> bool:
+        """True when at least one artifact came from the fallback backend."""
+        return StorageProviderType.GITHUB_ARTIFACT in self.artifact_providers

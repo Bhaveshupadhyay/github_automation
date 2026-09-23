@@ -43,20 +43,32 @@ once by an operator rather than by the pipeline:
 qa-publish --apply-lifecycle
 ```
 
-The rule is scoped to the `qa/` prefix, so a shared bucket is unaffected. Re-running it is safe.
+The rule is scoped to the `qa/` prefix, so objects outside it are unaffected. Because
+`PutBucketLifecycleConfiguration` replaces a bucket's entire configuration, the command reads the
+existing rules and merges: every unrelated rule is preserved, and re-running replaces only the rule
+carrying the QA ID.
 
 ## Publishing a run
 
 ```bash
 qa-publish \
   --repo "$GITHUB_REPOSITORY" \
-  --pr 42 \
-  --sha "$GITHUB_SHA" \
+  --pr "${{ github.event.number }}" \
+  --sha "${{ github.event.pull_request.head.sha }}" \
   --test-result results/run.json \
   --media-result results/media.json \
   --branch-result results/branch.json \
   --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 ```
+
+**Pass the PR head SHA, not `GITHUB_SHA`.** On a `pull_request` event `GITHUB_SHA` is the synthetic
+merge commit of `refs/pull/N/merge`, which appears nowhere in the PR's commit list — reviewers would
+see a SHA they cannot find, and media would be keyed by a commit that is recreated whenever the base
+branch moves. When `--sha` and `--pr` are omitted they are read from `GITHUB_EVENT_PATH`, which
+resolves to the head SHA already, so both flags can be dropped inside a workflow.
+
+Publishing fails fast when no SHA can be resolved. An empty SHA would collapse every run onto one
+object key and serve the previous run's cached media beside the current run's text.
 
 `--dry-run` renders the comment to stdout without uploading or posting, which is the quickest way to
 iterate on formatting.
@@ -118,8 +130,23 @@ Both conditions are load-bearing:
   overwritten.
 - **First page only** would miss the bot's comment on a busy PR and post duplicates.
 
-When the token cannot call `/user` — which is the case for a workflow `GITHUB_TOKEN` — authorship
-falls back to requiring a machine account, which still excludes humans.
+Identity is resolved in this order:
+
+1. `QA_BOT_LOGIN`, when configured.
+2. The `/user` endpoint, which works for a personal access token.
+3. `github-actions[bot]`, when `GITHUB_ACTIONS=true`. A workflow `GITHUB_TOKEN` cannot call `/user`,
+   but every comment it authors belongs to that account, so the identity is still known exactly.
+4. Otherwise, any machine account — which still excludes humans, but is not a verified match.
+
+**Duplicate removal is disabled on that last path.** Deleting a comment on the strength of an
+unverified match risks destroying another bot's comment, which is worse than leaving a duplicate.
+Set `QA_BOT_LOGIN` to restore exact matching outside GitHub Actions.
 
 If a concurrent run has left more than one marked comment, the newest is updated and the rest are
-deleted. Phase 6's `cancel-in-progress` prevents nearly all occurrences; this is the backstop.
+deleted. Because read-then-create is not atomic, the publisher also re-reads after creating a
+comment and collapses anything a racing run posted in between, so each completed call restores the
+one-comment invariant. Phase 6's `cancel-in-progress` prevents nearly all occurrences; these are the
+backstop.
+
+Comment discovery stops at 2,000 comments (20 pages). Beyond that the publisher logs a warning
+rather than silently posting a duplicate.

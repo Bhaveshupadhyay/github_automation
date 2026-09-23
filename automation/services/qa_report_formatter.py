@@ -18,6 +18,9 @@ MAX_FAILURE_MESSAGE_CHARS = 1200
 # How many failing journeys to detail before summarising the remainder.
 MAX_DETAILED_FAILURES = 5
 
+# Journey names come from the model and have no enforced length.
+MAX_JOURNEY_NAME_CHARS = 200
+
 RESOLUTION_LABELS = {
     ResolutionSource.EXPLICIT_PR_BODY: "declared in the PR description",
     ResolutionSource.AI_SEMANTIC_EXTRACTION: "inferred from the PR description",
@@ -35,6 +38,21 @@ class QAReportFormatter:
     def __init__(self, marker: str = COMMENT_MARKER, max_chars: int = MAX_COMMENT_CHARS):
         self._marker = marker
         self._max_chars = max_chars
+
+    @staticmethod
+    def _escape_markdown(text: str) -> str:
+        """Render model-authored text as data rather than markup.
+
+        Journey names are written by Gemini from a diff, so they are untrusted input to
+        this comment. Left raw, a name containing link, image or HTML syntax would alter
+        what the published comment renders.
+        """
+        escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        for char in "\\`*_[]()#|":
+            escaped = escaped.replace(char, f"\\{char}")
+        if len(escaped) > MAX_JOURNEY_NAME_CHARS:
+            escaped = escaped[:MAX_JOURNEY_NAME_CHARS] + "…"
+        return escaped
 
     @staticmethod
     def _sanitize_for_code_block(text: str) -> str:
@@ -63,12 +81,23 @@ class QAReportFormatter:
             label = "Watch the full recording" if report.video.is_embeddable else "Download the full recording"
             lines.append(f"▶️ [{label}]({report.video.public_url})")
 
-        if report.storage_degraded:
+        # Describe what actually happened to this report's media. One upload can fall
+        # back while a later one succeeds, so "all" and "some" are different claims.
+        if report.all_media_degraded:
             lines.append("")
             lines.append(
                 "> ⚠️ Cloud storage was unavailable, so media was saved as workflow artifacts. "
                 "Artifacts are authenticated zip downloads, so the preview cannot render inline here."
             )
+        elif report.any_media_degraded:
+            lines.append("")
+            lines.append(
+                "> ⚠️ Some media could not be uploaded to cloud storage and was saved as workflow "
+                "artifacts instead. Those files are authenticated zip downloads."
+            )
+        elif report.storage_degraded and not report.artifacts:
+            lines.append("")
+            lines.append("> ⚠️ No media could be published for this run.")
 
         return lines
 
@@ -81,7 +110,7 @@ class QAReportFormatter:
         lines = ["", "### What failed", ""]
 
         for case in failures[:MAX_DETAILED_FAILURES]:
-            lines.append(f"**{case.journey_name}**")
+            lines.append(f"**{self._escape_markdown(case.journey_name)}**")
             lines.append("")
             if case.failure_message:
                 lines.append("```")
@@ -117,8 +146,12 @@ class QAReportFormatter:
         if result.duration_seconds:
             lines.append(f"| **Duration** | {result.duration_seconds:.1f}s |")
 
-        if report.storage_provider is StorageProviderType.GITHUB_ARTIFACT:
+        # Name the backends that actually served this report's media, so the row cannot
+        # contradict the warning above it.
+        if report.all_media_degraded:
             lines.append("| **Media** | GitHub Actions artifacts |")
+        elif report.any_media_degraded:
+            lines.append("| **Media** | Cloud storage, with some files in workflow artifacts |")
 
         return lines
 
@@ -185,7 +218,10 @@ class QAReportFormatter:
         if not report.passed and report.failed_cases:
             first = report.failed_cases[0]
             if first.failure_message:
+                # Strip Slack's own link delimiters: this text is model-adjacent and
+                # `<url|label>` in a message body would render as a link.
                 snippet = first.failure_message.strip().splitlines()[0][:200]
+                snippet = snippet.replace("<", "").replace(">", "").replace("`", "")
                 parts.append(f"• First failure: `{snippet}`")
 
         return "\n".join(parts)

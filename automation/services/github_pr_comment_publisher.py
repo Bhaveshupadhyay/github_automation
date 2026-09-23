@@ -47,6 +47,7 @@ class GitHubPRCommentPublisher(IPRCommentPublisher):
         self._bot_login = bot_login or os.getenv("QA_BOT_LOGIN") or None
         self._marker = marker
         self._identity_resolved = False
+        self._identity_verified = bool(self._bot_login)
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -82,16 +83,33 @@ class GitHubPRCommentPublisher(IPRCommentPublisher):
         self._identity_resolved = True
 
         if self._bot_login:
+            self._identity_verified = True
             return self._bot_login
 
         try:
             user = self._request("GET", f"{self._api_base}/user")
             if isinstance(user, dict) and user.get("login"):
                 self._bot_login = user["login"]
+                self._identity_verified = True
                 logger.debug(f"Resolved bot identity: {self._bot_login}")
+                return self._bot_login
         except RuntimeError as e:
-            logger.debug(f"Could not resolve bot identity ({e}); matching on account type instead.")
-        return self._bot_login
+            logger.debug(f"Could not resolve bot identity via /user ({e}).")
+
+        # A workflow GITHUB_TOKEN cannot call /user, but comments it authors always
+        # belong to this account, so the identity is still known exactly.
+        if os.getenv("GITHUB_ACTIONS") == "true":
+            self._bot_login = "github-actions[bot]"
+            self._identity_verified = True
+            logger.debug("Assuming the GitHub Actions bot identity for comment matching.")
+            return self._bot_login
+
+        logger.warning(
+            "Could not verify this bot's identity. Falling back to matching any machine "
+            "account, and duplicate removal is disabled to avoid deleting another bot's comment. "
+            "Set QA_BOT_LOGIN to restore exact matching."
+        )
+        return None
 
     def _is_own_comment(self, comment: dict) -> bool:
         """Whether this comment is the bot's own prior report.
@@ -120,6 +138,7 @@ class GitHubPRCommentPublisher(IPRCommentPublisher):
         first-page-only lookup would conclude no comment exists and post a duplicate.
         """
         comments: list[dict] = []
+        exhausted = False
         for page in range(1, MAX_COMMENT_PAGES + 1):
             url = (
                 f"{self._api_base}/repos/{repo}/issues/{pr_number}/comments"
@@ -127,10 +146,21 @@ class GitHubPRCommentPublisher(IPRCommentPublisher):
             )
             batch = self._request("GET", url)
             if not isinstance(batch, list) or not batch:
+                exhausted = True
                 break
             comments.extend(batch)
             if len(batch) < COMMENTS_PER_PAGE:
+                exhausted = True
                 break
+
+        if not exhausted:
+            # Only reachable on a pull request with more comments than the cap allows.
+            # Say so explicitly: the alternative is silently posting a duplicate.
+            logger.warning(
+                f"Stopped reading comments at the {MAX_COMMENT_PAGES}-page cap "
+                f"({len(comments)} comments). If the QA comment lies beyond this point it "
+                f"will not be found and a duplicate may be posted."
+            )
         return comments
 
     def find_existing_comment(self, repo: str, pr_number: int) -> Optional[dict]:
@@ -145,6 +175,49 @@ class GitHubPRCommentPublisher(IPRCommentPublisher):
         cancel-in-progress took effect.
         """
         return [c for c in self._iter_comments(repo, pr_number) if self._is_own_comment(c)]
+
+    def _collapse_duplicates(self, repo: str, own: list[dict]) -> int:
+        """Delete all but the newest of the bot's comments.
+
+        Skipped when authorship could not be verified: deleting a comment that merely
+        looks like ours, on the strength of an unverified match, is worse than leaving
+        a duplicate behind.
+        """
+        if len(own) <= 1:
+            return 0
+        if not self._identity_verified:
+            logger.warning(
+                f"Found {len(own)} comments matching the marker but could not verify authorship. "
+                f"Leaving them in place rather than risk deleting another account's comment."
+            )
+            return 0
+
+        removed = 0
+        for stale in own[:-1]:
+            if self._delete_comment(repo, stale["id"]):
+                removed += 1
+        return removed
+
+    def _collapse_after_create(self, repo: str, pr_number: int, created_id: Optional[int]) -> int:
+        """Remove any comment a racing run created alongside the one just posted.
+
+        The comment this call created is always kept, so both racing runs converge on a
+        single comment regardless of which one re-reads first.
+        """
+        if created_id is None or not self._identity_verified:
+            return 0
+        try:
+            own = self._find_all_own_comments(repo, pr_number)
+        except RuntimeError as e:
+            logger.debug(f"Could not re-read comments after creating one: {e}")
+            return 0
+
+        removed = 0
+        for other in own:
+            if other["id"] != created_id and self._delete_comment(repo, other["id"]):
+                logger.info(f"Removed a comment created concurrently by another run ({other['id']}).")
+                removed += 1
+        return removed
 
     def _delete_comment(self, repo: str, comment_id: int) -> bool:
         try:
@@ -172,17 +245,16 @@ class GitHubPRCommentPublisher(IPRCommentPublisher):
             suffix = "\n\n_(report truncated)_"
             body = body[: MAX_COMMENT_CHARS - len(suffix)] + suffix
 
+        # Resolve identity before scanning, so the deletion guard below reflects whether
+        # authorship could actually be verified.
+        self._resolve_bot_login()
+
         try:
             existing = self._find_all_own_comments(repo, pr_number)
         except RuntimeError as e:
             return PRCommentResult(success=False, error_message=f"Could not read PR comments: {e}")
 
-        # Collapse a racing duplicate rather than leaving two bot comments behind.
-        duplicates_removed = 0
-        if len(existing) > 1:
-            for stale in existing[:-1]:
-                if self._delete_comment(repo, stale["id"]):
-                    duplicates_removed += 1
+        duplicates_removed = self._collapse_duplicates(repo, existing)
 
         try:
             if existing:
@@ -206,9 +278,16 @@ class GitHubPRCommentPublisher(IPRCommentPublisher):
                 f"{self._api_base}/repos/{repo}/issues/{pr_number}/comments",
                 {"body": body},
             )
+            created_id = (created or {}).get("id")
             logger.info(f"Created QA comment on {repo}#{pr_number}")
+
+            # Read-then-create is not atomic: a concurrent run can pass the same
+            # "no comment exists" check and post its own. Re-reading after the write
+            # restores the one-comment invariant by the time this call returns.
+            duplicates_removed += self._collapse_after_create(repo, pr_number, created_id)
+
             return PRCommentResult(
-                comment_id=(created or {}).get("id"),
+                comment_id=created_id,
                 comment_url=(created or {}).get("html_url"),
                 created=True,
                 duplicates_removed=duplicates_removed,

@@ -165,30 +165,50 @@ class R2StorageProvider(IStorageProvider):
             provider=StorageProviderType.R2,
         )
 
+    def _existing_lifecycle_rules(self, client: Any) -> list[dict]:
+        """Read the bucket's current lifecycle rules, treating 'none set' as empty."""
+        try:
+            return client.get_bucket_lifecycle_configuration(Bucket=self._bucket).get("Rules", [])
+        except Exception as e:
+            # A bucket with no configuration raises NoSuchLifecycleConfiguration, which
+            # is the expected state on first run rather than an error.
+            response = getattr(e, "response", None)
+            code = response.get("Error", {}).get("Code") if isinstance(response, dict) else None
+            if code == "NoSuchLifecycleConfiguration" or "NoSuchLifecycleConfiguration" in str(e):
+                return []
+            raise
+
     def apply_lifecycle_policy(self, expiry_days: int = LIFECYCLE_EXPIRY_DAYS) -> bool:
         """Install the rule that expires QA media after `expiry_days`.
 
-        Idempotent: re-applying replaces the rule of the same ID. This needs bucket
-        admin permission, so it is a one-time setup step invoked by the CLI rather than
-        something a per-PR pipeline run should attempt.
+        PutBucketLifecycleConfiguration replaces a bucket's *entire* configuration, so
+        this reads the existing rules and merges rather than writing the QA rule alone.
+        Writing it alone would silently delete every unrelated lifecycle rule on a
+        shared bucket.
+
+        Idempotent: re-applying replaces only the rule carrying this ID. Needs bucket
+        admin permission, so it is a one-time operator step rather than something a
+        per-PR pipeline run should attempt.
         """
         try:
-            self._get_client().put_bucket_lifecycle_configuration(
+            client = self._get_client()
+            preserved = [r for r in self._existing_lifecycle_rules(client) if r.get("ID") != LIFECYCLE_RULE_ID]
+            preserved.append(
+                {
+                    "ID": LIFECYCLE_RULE_ID,
+                    "Status": "Enabled",
+                    "Filter": {"Prefix": f"{OBJECT_PREFIX}/"},
+                    "Expiration": {"Days": expiry_days},
+                }
+            )
+            client.put_bucket_lifecycle_configuration(
                 Bucket=self._bucket,
-                LifecycleConfiguration={
-                    "Rules": [
-                        {
-                            "ID": LIFECYCLE_RULE_ID,
-                            "Status": "Enabled",
-                            "Filter": {"Prefix": f"{OBJECT_PREFIX}/"},
-                            "Expiration": {"Days": expiry_days},
-                        }
-                    ]
-                },
+                LifecycleConfiguration={"Rules": preserved},
             )
             logger.info(
                 f"Applied lifecycle rule '{LIFECYCLE_RULE_ID}': objects under "
-                f"'{OBJECT_PREFIX}/' expire after {expiry_days} days."
+                f"'{OBJECT_PREFIX}/' expire after {expiry_days} days "
+                f"({len(preserved) - 1} unrelated rule(s) preserved)."
             )
             return True
         except Exception as e:

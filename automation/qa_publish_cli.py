@@ -44,6 +44,40 @@ def _load_json(path: Optional[str], label: str) -> Optional[dict]:
         return None
 
 
+def _default_head_sha() -> str:
+    """Resolve the PR's head commit, preferring the event payload over GITHUB_SHA.
+
+    On a `pull_request` event GITHUB_SHA is the synthetic merge commit of
+    `refs/pull/N/merge`, which appears nowhere in the PR's commit list. Reporting it
+    would show reviewers a SHA they cannot find, and would key stored media by a commit
+    that is recreated whenever the base branch moves.
+    """
+    event_path = os.getenv("GITHUB_EVENT_PATH", "")
+    if event_path and Path(event_path).is_file():
+        try:
+            event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+            head_sha = (event.get("pull_request") or {}).get("head", {}).get("sha")
+            if head_sha:
+                return head_sha
+        except (json.JSONDecodeError, OSError, AttributeError) as e:
+            logger.debug(f"Could not read head SHA from the event payload: {e}")
+    return os.getenv("GITHUB_SHA", "")
+
+
+def _default_pr_number() -> Optional[int]:
+    """Resolve the PR number from the event payload when not passed explicitly."""
+    event_path = os.getenv("GITHUB_EVENT_PATH", "")
+    if event_path and Path(event_path).is_file():
+        try:
+            event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+            number = event.get("number") or (event.get("pull_request") or {}).get("number")
+            if number:
+                return int(number)
+        except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
+            logger.debug(f"Could not read the PR number from the event payload: {e}")
+    return None
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Publish QA test results and media to a pull request.",
@@ -51,7 +85,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", ""), help="Target repository as 'owner/repo'.")
     parser.add_argument("--pr", type=int, default=None, help="Pull request number.")
-    parser.add_argument("--sha", default=os.getenv("GITHUB_SHA", ""), help="Head commit SHA the tests ran against.")
+    parser.add_argument(
+        "--sha",
+        default=None,
+        help="Head commit SHA the tests ran against. Defaults to the PR head from the event payload.",
+    )
     parser.add_argument("--test-result", default=None, help="Path to the TestRunResult JSON from the test runner.")
     parser.add_argument("--media-result", default=None, help="Path to the MediaProcessingResult JSON from qa-media.")
     parser.add_argument("--branch-result", default=None, help="Path to the BranchResolutionResult JSON.")
@@ -103,8 +141,22 @@ def main() -> int:
     if not args.repo or "/" not in args.repo:
         logger.error("A target repository is required, as --repo owner/name.")
         return 1
+
+    if not args.pr:
+        args.pr = _default_pr_number()
     if not args.pr:
         logger.error("A pull request number is required, as --pr N.")
+        return 1
+
+    if not args.sha:
+        args.sha = _default_head_sha()
+    if not args.sha:
+        # Without a real SHA every run would share one object key, so a reviewer would
+        # see the previous run's cached media beside the current run's text.
+        logger.error(
+            "A head commit SHA is required, as --sha. It could not be resolved from "
+            "GITHUB_EVENT_PATH or GITHUB_SHA."
+        )
         return 1
 
     # 1. Load the upstream phase outputs.

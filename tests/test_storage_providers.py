@@ -139,20 +139,89 @@ class TestR2Upload:
         assert artifact.is_embeddable is True
 
 
+class NoSuchLifecycleConfiguration(Exception):
+    """Mimics the botocore error raised for a bucket with no lifecycle configuration."""
+
+    def __init__(self):
+        super().__init__("NoSuchLifecycleConfiguration")
+        self.response = {"Error": {"Code": "NoSuchLifecycleConfiguration"}}
+
+
 class TestLifecyclePolicy:
+    def _written_rules(self, client) -> list[dict]:
+        _, kwargs = client.put_bucket_lifecycle_configuration.call_args
+        return kwargs["LifecycleConfiguration"]["Rules"]
+
     def test_rule_targets_the_qa_prefix_with_a_30_day_expiry(self):
         provider = R2StorageProvider(**R2_ENV)
         client = MagicMock()
+        client.get_bucket_lifecycle_configuration.side_effect = NoSuchLifecycleConfiguration()
         provider._client = client
 
         assert provider.apply_lifecycle_policy() is True
 
-        _, kwargs = client.put_bucket_lifecycle_configuration.call_args
-        rule = kwargs["LifecycleConfiguration"]["Rules"][0]
+        rule = self._written_rules(client)[0]
         assert rule["ID"] == LIFECYCLE_RULE_ID
         assert rule["Status"] == "Enabled"
         assert rule["Expiration"]["Days"] == 30
         assert rule["Filter"]["Prefix"] == f"{OBJECT_PREFIX}/"
+
+    def test_unrelated_rules_on_a_shared_bucket_are_preserved(self):
+        """PutBucketLifecycleConfiguration replaces the whole config, so it must merge."""
+        provider = R2StorageProvider(**R2_ENV)
+        client = MagicMock()
+        client.get_bucket_lifecycle_configuration.return_value = {
+            "Rules": [
+                {"ID": "archive-logs", "Status": "Enabled", "Expiration": {"Days": 90}},
+                {"ID": "purge-tmp", "Status": "Enabled", "Expiration": {"Days": 1}},
+            ]
+        }
+        provider._client = client
+
+        assert provider.apply_lifecycle_policy() is True
+
+        written_ids = [r["ID"] for r in self._written_rules(client)]
+        assert "archive-logs" in written_ids
+        assert "purge-tmp" in written_ids
+        assert LIFECYCLE_RULE_ID in written_ids
+
+    def test_reapplying_replaces_only_the_qa_rule(self):
+        provider = R2StorageProvider(**R2_ENV)
+        client = MagicMock()
+        client.get_bucket_lifecycle_configuration.return_value = {
+            "Rules": [
+                {"ID": "archive-logs", "Status": "Enabled", "Expiration": {"Days": 90}},
+                {"ID": LIFECYCLE_RULE_ID, "Status": "Enabled", "Expiration": {"Days": 7}},
+            ]
+        }
+        provider._client = client
+
+        provider.apply_lifecycle_policy(expiry_days=30)
+
+        rules = self._written_rules(client)
+        qa_rules = [r for r in rules if r["ID"] == LIFECYCLE_RULE_ID]
+        assert len(qa_rules) == 1, "The QA rule must not be duplicated"
+        assert qa_rules[0]["Expiration"]["Days"] == 30
+        assert len(rules) == 2
+
+    def test_missing_configuration_is_treated_as_empty(self):
+        provider = R2StorageProvider(**R2_ENV)
+        client = MagicMock()
+        client.get_bucket_lifecycle_configuration.side_effect = NoSuchLifecycleConfiguration()
+        provider._client = client
+
+        assert provider.apply_lifecycle_policy() is True
+        assert len(self._written_rules(client)) == 1
+
+    def test_unexpected_read_error_does_not_write(self):
+        """A permissions error must not be mistaken for an empty configuration."""
+        provider = R2StorageProvider(**R2_ENV)
+        client = MagicMock()
+        client.get_bucket_lifecycle_configuration.side_effect = Exception("AccessDenied")
+        provider._client = client
+
+        assert provider.apply_lifecycle_policy() is False
+        client.put_bucket_lifecycle_configuration.assert_not_called()
 
     def test_failure_is_reported_without_raising(self):
         provider = R2StorageProvider(**R2_ENV)

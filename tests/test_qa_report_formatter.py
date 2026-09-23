@@ -173,15 +173,88 @@ class TestFallbackStorageRendering:
         assert "![QA preview]" not in body
         assert "download from workflow artifacts" in body
 
-    def test_degraded_storage_is_explained(self, formatter):
-        report = passing_report(storage_degraded=True)
+    def test_fully_degraded_storage_is_explained(self, formatter):
+        report = passing_report(
+            gif=artifact(ArtifactKind.GIF, StorageProviderType.GITHUB_ARTIFACT),
+            video=artifact(ArtifactKind.VIDEO, StorageProviderType.GITHUB_ARTIFACT),
+            storage_degraded=True,
+        )
 
         assert "Cloud storage was unavailable" in formatter.format(report)
 
     def test_media_row_names_the_artifact_backend(self, formatter):
-        report = passing_report(storage_provider=StorageProviderType.GITHUB_ARTIFACT)
+        report = passing_report(
+            gif=artifact(ArtifactKind.GIF, StorageProviderType.GITHUB_ARTIFACT),
+            video=artifact(ArtifactKind.VIDEO, StorageProviderType.GITHUB_ARTIFACT),
+        )
 
-        assert "GitHub Actions artifacts" in formatter.format(report)
+        assert "| **Media** | GitHub Actions artifacts |" in formatter.format(report)
+
+    def test_mixed_providers_are_reported_as_partial(self, formatter):
+        """One upload can fall back while a later one succeeds on the primary."""
+        report = passing_report(
+            video=artifact(ArtifactKind.VIDEO, StorageProviderType.R2),
+            gif=artifact(ArtifactKind.GIF, StorageProviderType.GITHUB_ARTIFACT),
+            storage_degraded=True,
+        )
+
+        body = formatter.format(report)
+
+        assert "Some media could not be uploaded" in body
+        assert "Cloud storage was unavailable" not in body, "Must not claim all media fell back"
+        assert "| **Media** | GitHub Actions artifacts |" not in body
+
+    def test_report_with_no_media_says_so(self, formatter):
+        report = passing_report(video=None, gif=None, storage_degraded=True)
+
+        assert "No media could be published" in formatter.format(report)
+
+    def test_successful_r2_run_shows_no_storage_warning(self, formatter):
+        body = formatter.format(passing_report())
+
+        assert "⚠️" not in body
+
+
+class TestJourneyNameEscaping:
+    """Journey names are model-authored, so they are data and must not render as markup."""
+
+    def _report_named(self, name: str) -> QAReport:
+        return failing_report(
+            test_result=TestRunResult(
+                overall_outcome=TestOutcome.FAILED,
+                total_tests=1,
+                failed=1,
+                test_results=[TestCaseResult(journey_name=name, outcome=TestOutcome.FAILED)],
+            )
+        )
+
+    def test_markdown_image_syntax_is_neutralised(self, formatter):
+        body = formatter.format(self._report_named("![x](https://evil.example/track.png)"))
+
+        assert "![x](https://evil.example/track.png)" not in body
+        assert "evil.example" in body, "The text is still shown, just not rendered as an image"
+
+    def test_link_syntax_is_neutralised(self, formatter):
+        body = formatter.format(self._report_named("[click me](https://evil.example)"))
+
+        assert "[click me](https://evil.example)" not in body
+
+    def test_html_is_escaped(self, formatter):
+        body = formatter.format(self._report_named("<img src=x onerror=alert(1)>"))
+
+        assert "<img" not in body
+        assert "&lt;img" in body
+
+    def test_ordinary_name_stays_readable(self, formatter):
+        body = formatter.format(self._report_named("Rejects an incorrect password"))
+
+        assert "**Rejects an incorrect password**" in body
+
+    def test_overlong_name_is_truncated(self, formatter):
+        body = formatter.format(self._report_named("N" * 5000))
+
+        assert "…" in body
+        assert "N" * 5000 not in body
 
 
 class TestSafetyLimits:
