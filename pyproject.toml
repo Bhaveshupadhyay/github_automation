@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 qa = [
-    "playwright>=1.40.0",
+    "playwright>=1.51.0",
     "boto3>=1.34.0",
 ]
 

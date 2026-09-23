@@ -399,3 +399,20 @@ class TestLocatorHelpers:
     def test_select_finds_an_unlabelled_dropdown_by_an_option(self):
         _dropdown(self.page, "All Categories").select_option("Music", timeout=3000)
         assert self.page.locator("#category").input_value() == "Music"
+
+    def test_click_waits_for_an_exact_match_before_taking_a_partial_one(self):
+        self.page.set_content(
+            """<button onclick="document.title='draft'">Save draft</button>
+            <script>setTimeout(() => document.body.insertAdjacentHTML('beforeend',
+              '<button onclick="document.title=`save`">Save</button>'), 500)</script>"""
+        )
+        _clickable(self.page, "Save").click(timeout=3000)
+        assert self.page.title() == "save"
+
+    def test_click_ignores_a_titled_element_that_is_not_a_control(self):
+        self.page.set_content(
+            """<h2 title="Settings" onclick="document.title='heading'">Account</h2>
+            <a href="#s" onclick="document.title='link'">Settings</a>"""
+        )
+        _clickable(self.page, "Settings").click(timeout=3000)
+        assert self.page.title() == "link"

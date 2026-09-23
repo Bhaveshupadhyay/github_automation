@@ -27,18 +27,25 @@ def _assertion_locator(page, assertion: TestAssertion):
 # a dropdown's options. Each helper accepts every such name, since plain markup often has no
 # label. An exact match wins over a partial one ("Title" is not the "Search by title" box), and
 # only a visible element counts: a nav link can render once per viewport.
-def _best_match(build):
-    """The first visible exact match of build(exact), else the first visible partial match."""
-    exact = build(True).filter(visible=True)
-    return (exact if exact.count() else build(False).filter(visible=True)).first
+def _best_match(build, grace_ms=2000):
+    """The first visible exact match of build(exact), else the first visible partial match.
+
+    The exact match gets grace_ms to render first, so a partial match already on the page
+    ("Save draft") is not chosen over the exact one about to appear ("Save").
+    """
+    exact = build(True).filter(visible=True).first
+    try:
+        exact.wait_for(state="visible", timeout=grace_ms)
+        return exact
+    except Exception:
+        return build(False).filter(visible=True).first
 
 
 def _clickable(page, target):
-    """A button or link by its accessible name, or an icon-only control by its title."""
+    """A button or link by its accessible name: its text, aria-label, or (icon-only) title."""
     return _best_match(lambda exact: (
         page.get_by_role("button", name=target, exact=exact)
         .or_(page.get_by_role("link", name=target, exact=exact))
-        .or_(page.get_by_title(target, exact=exact))
     ))
 
 

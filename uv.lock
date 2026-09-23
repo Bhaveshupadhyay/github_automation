@@ -315,7 +315,7 @@ requires-dist = [
     { name = "boto3", marker = "extra == 'qa'", specifier = ">=1.34.0" },
     { name = "google-genai", specifier = ">=0.1.0" },
     { name = "jsonschema", specifier = ">=4.20.0" },
-    { name = "playwright", marker = "extra == 'qa'", specifier = ">=1.40.0" },
+    { name = "playwright", marker = "extra == 'qa'", specifier = ">=1.51.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
 ]
 provides-extras = ["qa"]

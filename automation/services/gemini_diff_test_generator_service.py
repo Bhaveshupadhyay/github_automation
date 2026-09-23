@@ -51,7 +51,7 @@ Your task:
 Rules for test journeys:
 - Each journey targets ONE specific user flow affected by the diff.
 - Use accessible selectors: role-based (button, link, textbox, heading) and visible text. NEVER use CSS selectors or test IDs.
-- Every action target MUST be text copied verbatim from the diff, never a description of the element
+- Every click, fill and select target MUST be text copied verbatim from the diff, never a description of the element
   (write "Admin Panel", not "link to Admin"; write "Search posts...", not "textbox for search"):
   - click: the button or link text, or its aria-label or title.
   - fill: the field's label text, aria-label, or placeholder.
