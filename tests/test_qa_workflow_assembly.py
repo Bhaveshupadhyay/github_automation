@@ -75,6 +75,20 @@ class TestReusableContract(unittest.TestCase):
                 required = [key for key, spec in secrets.items() if spec.get("required")]
                 self.assertEqual(required, ["SOPS_AGE_KEY"])
 
+    def test_the_tooling_checkout_defaults_to_this_workflows_own_commit(self) -> None:
+        """A caller pinned to a branch must get that branch's CLIs. Defaulting to `main`
+        would run new steps against whatever `main` holds — during a branch pilot, CLIs
+        that do not yet exist."""
+        for name in REUSABLE_WORKFLOWS:
+            document = _load(WORKFLOW_DIR / name)
+            with self.subTest(workflow=name):
+                self.assertEqual(
+                    _triggers(document)["workflow_call"]["inputs"]["tooling-ref"]["default"], ""
+                )
+                job = _preview_job(document)
+                checkout = job["steps"][_step_index(job, "Checkout QA tooling")]
+                self.assertIn("github.job_workflow_sha", checkout["with"]["ref"])
+
     def test_backend_repository_is_an_input_not_a_constant(self) -> None:
         """A hardcoded repository would couple the pipeline to one product."""
         for name in REUSABLE_WORKFLOWS:

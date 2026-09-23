@@ -151,5 +151,27 @@ test names the failure it excludes, so it can fail for the right reason.
 For the YAML itself:
 
 ```bash
-actionlint .github/workflows/qa-web-preview.yml .github/workflows/qa-mobile-preview.yml
+actionlint -ignore 'property "job_workflow_sha" is not defined' \
+  .github/workflows/qa-web-preview.yml .github/workflows/qa-mobile-preview.yml
 ```
+
+The ignore is a false positive: `github.job_workflow_sha` is documented by GitHub but
+missing from actionlint 1.7.7's context table. It is not relied upon blindly — the tooling
+install step verifies `qa-run` exists and fails with an actionable message if the checkout
+resolved to a commit that predates it.
+
+## Piloting before merge
+
+Component tests pass on both sides of a missing bridge, so the pipeline must run once end
+to end against a real pull request before these workflows are merged. Point a caller at
+the feature branch:
+
+```yaml
+uses: bhaveshupadhyay/github_automation/.github/workflows/qa-web-preview.yml@feat/qa-automation-phase-6
+```
+
+The tooling checkout follows that same commit automatically, so no second ref needs
+pinning. Run it on one real frontend PR carrying the `qa-preview` label — that single run
+exercises SOPS decryption, branch resolution, health probes, plan generation, Playwright,
+storage and the comment publisher together, and is itself the first of the Phase 7.1
+pilot runs.

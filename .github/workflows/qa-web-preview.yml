@@ -21,10 +21,12 @@ on:
         required: false
         default: "dev"
       tooling-ref:
-        description: "Ref of bhaveshupadhyay/github_automation supplying the qa-* CLIs."
+        description: >-
+          Ref of bhaveshupadhyay/github_automation supplying the qa-* CLIs. Defaults to the
+          commit of this workflow file, so the CLIs always match the steps calling them.
         type: string
         required: false
-        default: "main"
+        default: ""
       db-strategy:
         description: "auto, cloud_dev or ephemeral_container."
         type: string
@@ -138,7 +140,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: bhaveshupadhyay/github_automation
-          ref: ${{ inputs.tooling-ref }}
+          # `job_workflow_sha` is the commit of this reusable workflow file. Defaulting to
+          # it means a caller pinned to a branch gets that branch's CLIs, instead of this
+          # file's steps running against whatever `main` happens to hold.
+          ref: ${{ inputs.tooling-ref || github.job_workflow_sha }}
           path: tooling
 
       - name: Set up Python and uv
@@ -149,7 +154,17 @@ jobs:
           cache-dependency-glob: "tooling/uv.lock"
 
       - name: Install QA tooling
-        run: uv sync --project "$TOOLING_DIR" --extra qa
+        run: |
+          set -euo pipefail
+          uv sync --project "$TOOLING_DIR" --extra qa
+          echo "Tooling at $(git -C "$TOOLING_DIR" rev-parse --short HEAD)"
+          # Guards against a caller pinned to a branch resolving its CLIs from a different
+          # commit than this file. The symptom would otherwise be an unexplained "command
+          # not found" in the middle of the run.
+          if ! uv run --project "$TOOLING_DIR" qa-run --help > /dev/null 2>&1; then
+            echo "::error::The checked-out QA tooling has no qa-run command. Set the tooling-ref input to the ref supplying these workflows."
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
