@@ -70,6 +70,7 @@ Add it to `contracts/qa-targets.json`:
 | `platform` | — | `web` or `mobile`: which pipeline runs |
 | `backend_repo` | — | Backend paired with this repository |
 | `backend_default_branch` | `main` | Used when the PR declares no backend branch and no head matches |
+| `alternate_backend_repos` | `[]` | Other backends a requester may choose. Any other repository is refused, since a backend runs beside the QA secrets |
 | `dev_api_url` | none | Deployed dev API base URL for the `dev` answer. Unset, `dev` is refused with a reason |
 | `slack_channel` | none | Slack channel for a manual re-run's result. A Slack request replies in its own thread |
 | `db_strategy` | `auto` | `auto`, `cloud_dev` or `ephemeral_container` |
@@ -106,17 +107,20 @@ resolved from the PR (explicit declaration → matching remote head → default)
 
 **`publish`** runs on a fresh runner, downloads the results, uploads the media to R2,
 edits the single PR comment in place and replies in the Slack thread that asked. It runs
-even when `qa-preview` failed, so a red run still publishes the recording of its failure;
-a run that stopped before any test ran, and a skipped request, are also answered in the
+even when `qa-preview` failed, so a red run still publishes the recording of its failure,
+but not when the run was cancelled by a newer request. A run that stopped before any test
+ran, a skipped request, and a `resolve` that failed outright are also answered in the
 thread.
 
 ## Guardrails
 
-**Secret isolation.** The pull request's code runs only in `qa-preview`. The token that
-can write to the pull request and the R2 credentials exist only in `publish`, on a
-separate runner, so no step of the PR's code can read them from a neighbouring process or
-a file. In `qa-preview` the PAT appears only as a checkout credential, and every checkout
-sets `persist-credentials: false`, so no token is left in `.git/config`.
+**Secret isolation.** The pull request's code runs only in `qa-preview`. GitHub sends
+every secret a job references to that job's runner, where the PR's code has sudo, so
+`qa-preview` does not reference the PAT or the R2 credentials at all: they exist only in
+`resolve` and `publish`, which run none of the PR's code. `qa-preview` clones with a
+read-only token — `QA_READ_TOKEN` when set, else the run's own token, which can read
+public repositories — and every checkout sets `persist-credentials: false`. A backend
+the requester names must be `backend_repo` or listed in `alternate_backend_repos`.
 
 **Fork safety.** Fork code would run with this repository's secrets, so forks never run.
 `qa-pr-context` refuses them against the API, so neither a Slack request nor a manual
@@ -155,7 +159,8 @@ All in **this repository's** Actions secrets.
 
 | Secret | Required | Used by | Absent behaviour |
 | :--- | :--- | :--- | :--- |
-| `PAT_TOKEN` | Yes | `resolve`, clones, `publish` | Cannot read the PR or comment on it. Needs read access to the repositories under test and write access to their pull requests |
+| `PAT_TOKEN` | Yes | `resolve`, `publish` | Cannot read the PR or comment on it. Needs read access to the repositories under test and write access to their pull requests |
+| `QA_READ_TOKEN` | Private repos only | `qa-preview` clones | Read-only (`contents: read`) token for cloning private repositories under test. Public ones clone with the run's own token |
 | `SOPS_AGE_KEY` | Yes | `qa-preview` | Fails fast at the decryption step |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL` | No | `publish` | Media falls back to workflow artifacts |
 | `GEMINI_API_KEY` | No | `resolve`, `qa-preview` | Test generation falls back to the baseline smoke suite |

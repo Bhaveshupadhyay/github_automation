@@ -5,7 +5,7 @@ request. Which repositories it serves, and how each pairs with its backend, is r
 here rather than in the repositories under test.
 """
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,6 +23,10 @@ class QATarget(BaseModel):
     platform: QAPlatform = Field(..., description="Pipeline that previews this repository's pull requests")
     backend_repo: str = Field(..., pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", description="Paired backend as owner/name")
     backend_default_branch: str = Field("main", description="Backend branch used when the PR declares none and no head matches")
+    alternate_backend_repos: List[str] = Field(
+        default_factory=list,
+        description="Other backends a requester may choose. Only these and backend_repo run with QA secrets.",
+    )
     slack_channel: Optional[str] = Field(
         None, description="Slack channel for results of a manual re-run. A Slack request replies in its own thread."
     )
@@ -39,6 +43,11 @@ class QATarget(BaseModel):
     api_base_url: str = Field("http://10.0.2.2:8000")
     android_api_level: int = Field(34)
     java_version: str = Field("17")
+
+    def allows_backend(self, repository: str) -> bool:
+        """Whether a requester may pair this repository with `repository` as its backend."""
+        allowed = [self.backend_repo, *self.alternate_backend_repos]
+        return repository.lower() in (name.lower() for name in allowed)
 
 
 class QATargetRegistry(BaseModel):

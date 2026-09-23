@@ -25,6 +25,7 @@ export function extractPullRequestRefs(text) {
 // The bot's question, and how it names the frontend PR it is asking about.
 const QUESTION_PATTERN = /QA for\* `([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)`.*which backend/s;
 const MAIN_PATTERN = /\bmain\b(?:\s+(?:of\s+)?`?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)`?)?/i;
+const REPOSITORY_PATTERN = /[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/g;
 
 /**
  * Reads the requester's answer to "which backend?" as a backend spec.
@@ -37,9 +38,12 @@ export function parseBackendAnswer(text, frontendRepository) {
   const backendPr = extractPullRequestRefs(clean)
     .find(ref => ref.repository.toLowerCase() !== frontendRepository.toLowerCase());
   if (backendPr) return `${backendPr.repository}#${backendPr.number}`;
-  if (/\bdev\b/i.test(clean)) return "dev";
+  // A named repository is matched before the `dev` keyword, and removed before looking
+  // for it: `main of acme/dev-api` names a backend, and the hyphen makes `dev` a word.
   const main = clean.match(MAIN_PATTERN);
-  if (main) return main[1] ? `main:${main[1]}` : "main";
+  if (main?.[1]) return `main:${main[1]}`;
+  if (/\bdev\b/i.test(clean.replace(REPOSITORY_PATTERN, " "))) return "dev";
+  if (main) return "main";
   if (/\b(no|none|nope|there isn'?t)\b/i.test(clean)) return "none";
   return null;
 }
@@ -173,12 +177,12 @@ export class QaRequestService {
       : "`dev` — use the deployed dev APIs _(not configured yet: set `dev_api_url` in contracts/qa-targets.json)_";
     const options = noBackendPr
       ? [
-          `\`main\` — run \`${target.backend_repo}\`'s main branch in the runner (or \`main owner/repo\` for another backend)`,
+          `\`main\` — run \`${target.backend_repo}\`'s main branch in the runner (or \`main owner/repo\` for another registered backend)`,
           dev,
         ]
       : [
           "the backend PR link, or `owner/repo#number` — test against that PR's branch",
-          `\`main\` — no backend PR: run \`${target.backend_repo}\`'s main branch in the runner (or \`main owner/repo\`)`,
+          `\`main\` — no backend PR: run \`${target.backend_repo}\`'s main branch in the runner (or \`main owner/repo\` for another registered backend)`,
           dev,
         ];
     await this.slackService.postMessage(

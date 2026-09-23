@@ -20,6 +20,7 @@ REGISTRY = QATargetRegistry.model_validate(
                 "platform": "web",
                 "backend_repo": "acme/api",
                 "backend_default_branch": "develop",
+                "alternate_backend_repos": ["acme/other-api"],
                 "slack_channel": "C123",
                 "dev_api_url": "https://dev-api.acme.test",
             },
@@ -131,6 +132,17 @@ class TestBackendChoice:
     def test_main_of_another_repository(self) -> None:
         choice = self._service().resolve_backend("main:acme/other-api", self.WEB)
         assert (choice.repository, choice.ref) == ("acme/other-api", "main")
+
+    def test_an_unregistered_backend_repository_is_refused(self) -> None:
+        """A backend runs beside the QA secrets; any repository a requester names must not."""
+        with pytest.raises(PullRequestSkipped, match="not a registered backend"):
+            self._service().resolve_backend("main:mallory/evil", self.WEB)
+        with pytest.raises(PullRequestSkipped, match="not a registered backend"):
+            self._service(_pr(head_repo="mallory/evil")).resolve_backend("mallory/evil#1", self.WEB)
+
+    def test_an_allowlisted_backend_pr_is_accepted(self) -> None:
+        choice = self._service(_pr(head_repo="acme/other-api")).resolve_backend("acme/other-api#2", self.WEB)
+        assert choice.repository == "acme/other-api"
 
     def test_dev_points_at_the_configured_dev_apis(self) -> None:
         choice = self._service().resolve_backend("dev", self.WEB)

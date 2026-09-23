@@ -183,8 +183,38 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-  # Runs the pull request's code. Holds no token that can write to the pull request and
-  # no storage credential: those belong to `publish`, on a separate runner.
+      # An invalid dispatch, an API error or an expired token fails this job before the
+      # skip decision exists, so neither later job runs. The requester still hears.
+      - name: Tell the requester the run could not start
+        if: failure()
+        env:
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          export SLACK_CHANNEL="$REQUEST_SLACK_CHANNEL" SLACK_THREAD="$REQUEST_SLACK_THREAD"
+          export MESSAGE="❌ *QA testing for ${PR_REPOSITORY}#${PR_NUMBER} could not start.* Logs: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          token, channel = os.getenv("SLACK_TOKEN"), os.getenv("SLACK_CHANNEL")
+          if token and channel:
+              payload = {"channel": channel, "text": os.environ["MESSAGE"]}
+              if os.getenv("SLACK_THREAD"):
+                  payload["thread_ts"] = os.environ["SLACK_THREAD"]
+              req = urllib.request.Request(
+                  "https://slack.com/api/chat.postMessage",
+                  data=json.dumps(payload).encode(),
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+              )
+              try:
+                  urllib.request.urlopen(req, timeout=10).read()
+              except Exception as e:
+                  print(f"::warning::Slack notice not sent: {e}")
+          EOF
+
+  # Runs the pull request's code. GitHub hands every secret a job references to its
+  # runner, where that code has sudo, so this job references no token that can write to
+  # the pull request and no storage credential: those belong to `publish`, on a separate
+  # runner. Clones use a read-only token — QA_READ_TOKEN for private repositories, else
+  # this run's own token, which can read public ones.
   qa-preview:
     needs: resolve
     if: needs.resolve.outputs.skip == 'false'
@@ -204,7 +234,7 @@ jobs:
         with:
           repository: ${{ needs.resolve.outputs.repository }}
           ref: ${{ needs.resolve.outputs.head_sha }}
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ secrets.QA_READ_TOKEN || github.token }}
           fetch-depth: 0
           persist-credentials: false
           path: mobile
@@ -282,7 +312,7 @@ jobs:
         with:
           repository: ${{ needs.resolve.outputs.backend_repo }}
           ref: ${{ needs.resolve.outputs.backend_branch }}
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ secrets.QA_READ_TOKEN || github.token }}
           persist-credentials: false
           path: backend
 
@@ -519,7 +549,9 @@ jobs:
   # code, so the write token and the storage credentials never share its runner.
   publish:
     needs: [resolve, qa-preview]
-    if: always() && needs.resolve.outputs.skip == 'false'
+    # Runs after a failed preview, but not after a cancelled one: a newer request
+    # superseded it, and its "stopped early" notice would contradict the live run.
+    if: ${{ !cancelled() && needs.resolve.outputs.skip == 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:

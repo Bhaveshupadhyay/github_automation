@@ -103,7 +103,9 @@ def main() -> None:
     startup_began = time.monotonic()
     try:
         db_strategy = None
-        if args.db_strategy:
+        # Frontend-only mode starts no backend, so it provisions no database. Building a
+        # strategy anyway can open a WireGuard tunnel that nothing would tear down.
+        if args.db_strategy and not args.no_backend:
             strat_type = DatabaseStrategyType(args.db_strategy)
             wg_raw = args.wireguard_conf or os.getenv("WIREGUARD_CONF")
             wg_cfg = None

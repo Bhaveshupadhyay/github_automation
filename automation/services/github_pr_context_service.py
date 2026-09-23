@@ -103,6 +103,17 @@ class GitHubPullRequestContextService(IPullRequestContextService):
             )
         return pr
 
+    @staticmethod
+    def _require_trusted_backend(repository: str, target: QATarget) -> None:
+        """A backend is cloned and started beside the QA secrets, so only a registered one
+        may run. Anyone who can message the bot could otherwise run any repository here."""
+        if not target.allows_backend(repository):
+            raise PullRequestSkipped(
+                f"`{repository}` is not a registered backend for this repository. Allowed: "
+                f"{', '.join([target.backend_repo, *target.alternate_backend_repos])}. "
+                "Add it to `alternate_backend_repos` in contracts/qa-targets.json to allow it."
+            )
+
     def resolve_backend(self, spec: str, target: QATarget) -> BackendChoice:
         spec = (spec or "").strip()
 
@@ -124,6 +135,7 @@ class GitHubPullRequestContextService(IPullRequestContextService):
         main = BACKEND_MAIN_SPEC.match(spec)
         if main:
             repository = main.group(1) or target.backend_repo
+            self._require_trusted_backend(repository, target)
             # The registered backend's own default branch; any other repository's `main`.
             branch = target.backend_default_branch if repository.lower() == target.backend_repo.lower() else "main"
             return BackendChoice(
@@ -133,6 +145,7 @@ class GitHubPullRequestContextService(IPullRequestContextService):
         pull = BACKEND_PR_SPEC.match(spec)
         if pull:
             repository, number = pull.group(1), int(pull.group(2))
+            self._require_trusted_backend(repository, target)
             pr = self._fetch_runnable_pr(repository, number)
             return BackendChoice(
                 mode=BackendMode.PULL_REQUEST,

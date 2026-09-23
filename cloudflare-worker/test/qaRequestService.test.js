@@ -63,6 +63,10 @@ test("backend answers", () => {
   assert.equal(parseBackendAnswer("main of acme/other-api", "acme/web"), "main:acme/other-api");
   assert.equal(parseBackendAnswer("no backend pr", "acme/web"), "none");
   assert.equal(parseBackendAnswer("hmm?", "acme/web"), null);
+  // A repository containing `dev` is a repository, not the dev APIs.
+  assert.equal(parseBackendAnswer("main of acme/dev-api", "acme/web"), "main:acme/dev-api");
+  assert.equal(parseBackendAnswer("main acme/api-dev", "acme/web"), "main:acme/api-dev");
+  assert.equal(parseBackendAnswer("dev please", "acme/web"), "dev");
   // A link to the frontend PR itself is not a backend.
   assert.equal(parseBackendAnswer("acme/web#9", "acme/web"), null);
 });

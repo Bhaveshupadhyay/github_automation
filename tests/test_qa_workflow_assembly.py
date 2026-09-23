@@ -118,14 +118,25 @@ class TestJobStructure(unittest.TestCase):
                 self.assertEqual(job["needs"], "resolve")
                 self.assertIn("needs.resolve.outputs.skip == 'false'", job["if"])
 
-    def test_publishing_runs_after_a_failed_preview(self) -> None:
-        """The recording of a failure is the most valuable thing a red run produces."""
+    def test_publishing_runs_after_a_failed_preview_but_not_a_cancelled_one(self) -> None:
+        """The recording of a failure is the most valuable thing a red run produces. A run
+        cancelled by a newer request must stay silent: its "stopped early" notice would
+        contradict the run that superseded it, and `always()` would still post it."""
         for name, _, document in _workflows():
             with self.subTest(workflow=name):
                 job = _job(document, "publish")
                 self.assertEqual(sorted(job["needs"]), ["qa-preview", "resolve"])
-                self.assertIn("always()", job["if"])
+                self.assertIn("!cancelled()", job["if"])
+                self.assertNotIn("always()", job["if"])
                 self.assertIn("needs.resolve.outputs.skip == 'false'", job["if"])
+
+    def test_a_failed_resolve_is_answered(self) -> None:
+        """A failure before the skip decision leaves both later jobs skipped."""
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                notice = _step(_job(document, "resolve"), "could not start")
+                self.assertEqual(notice["if"], "failure()")
+                self.assertIn("chat.postMessage", notice["run"])
 
     def test_a_skipped_pull_request_is_explained(self) -> None:
         for name, _, document in _workflows():
@@ -220,14 +231,17 @@ class TestSecretIsolation(unittest.TestCase):
                 for key in R2_SECRETS:
                     self.assertEqual(publish["env"][key], f"${{{{ secrets.{key} }}}}")
 
-    def test_the_preview_job_uses_the_write_token_only_to_clone(self) -> None:
-        """In the preview job the token appears only as a checkout credential, which is
-        never persisted to disk."""
+    def test_the_preview_job_never_references_the_write_token(self) -> None:
+        """GitHub sends every secret a job references to its runner, where the PR's code
+        has sudo and can read the runner's memory. Not persisting a checkout credential
+        is not enough; the preview job must not reference the PAT at all."""
         for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                for step in _job(document, "qa-preview")["steps"]:
-                    self.assertNotIn("PAT_TOKEN", str(step.get("env", "")), step.get("name"))
-                    self.assertNotIn("PAT_TOKEN", str(step.get("run", "")), step.get("name"))
+                job = _job(document, "qa-preview")
+                self.assertNotIn("PAT_TOKEN", str(job))
+                for step in job["steps"]:
+                    if "actions/checkout" in str(step.get("uses", "")) and "token" in step.get("with", {}):
+                        self.assertEqual(step["with"]["token"], "${{ secrets.QA_READ_TOKEN || github.token }}")
 
     def test_no_checkout_leaves_a_token_on_disk(self) -> None:
         """actions/checkout writes its token into .git/config unless told not to, where

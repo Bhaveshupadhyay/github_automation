@@ -226,6 +226,26 @@ class TestLifecycleSupervisorCIHandoff(unittest.TestCase):
         written = json.loads((self.root / "lifecycle.json").read_text(encoding="utf-8"))
         self.assertIn("WireGuard config is malformed", written["error_message"])
 
+    @patch("automation.lifecycle_supervisor_cli.get_database_strategy")
+    @patch("automation.lifecycle_supervisor_cli.get_lifecycle_supervisor")
+    def test_frontend_only_mode_builds_no_database_strategy(self, mock_get_sup, mock_get_db) -> None:
+        """Building one can open a WireGuard tunnel, and with no backend nothing tears it down."""
+        mock_sup = MagicMock()
+        mock_sup.start_services.return_value = LifecycleResult(success=True, startup_duration_seconds=0.1)
+        mock_get_sup.return_value = mock_sup
+
+        argv = self._args("--check-only", "--db-strategy", "auto", "--no-backend", "--api-base-url", "https://dev.test")
+        with patch("sys.argv", argv):
+            with patch("sys.stdout", new_callable=io.StringIO):
+                with self.assertRaises(SystemExit):
+                    main()
+
+        mock_get_db.assert_not_called()
+        kwargs = mock_sup.start_services.call_args.kwargs
+        self.assertIsNone(kwargs["backend_dir"])
+        self.assertIsNone(kwargs["db_strategy"])
+        self.assertEqual(kwargs["api_base_url_override"], "https://dev.test")
+
     @patch("automation.lifecycle_supervisor_cli.get_lifecycle_supervisor")
     def test_the_pid_file_names_this_process(self, mock_get_sup) -> None:
         """A CI teardown step signals this PID; the wrong one leaves services running."""
