@@ -438,7 +438,7 @@ class TestDiffTruncation:
         mock_client = _make_mock_client(SAMPLE_GEMINI_NO_UI_RESPONSE)
         service = _make_service(mock_client)
 
-        large_diff = "diff --git a/file.tsx b/file.tsx\n" + ("+ added line\n" * 10000)
+        large_diff = "diff --git a/file.tsx b/file.tsx\n" + ("+ added line\n" * (MAX_DIFF_CHARS // 10))
         assert len(large_diff) > MAX_DIFF_CHARS
 
         plan = service.generate_test_plan(diff=large_diff, commit_sha="large-sha")
@@ -456,7 +456,7 @@ class TestDiffTruncation:
         service = _make_service(_make_mock_client(SAMPLE_GEMINI_NO_UI_RESPONSE))
         large_diff = "".join(
             f"diff --git a/f{i}.tsx b/f{i}.tsx\n--- a/f{i}.tsx\n+++ b/f{i}.tsx\n@@ -1 +1 @@\n+ line\n"
-            for i in range(2000)
+            for i in range(MAX_DIFF_CHARS // 40)
         )
 
         truncated = service._truncate_diff(large_diff)
@@ -467,7 +467,7 @@ class TestDiffTruncation:
     def test_headers_kept_after_content_budget_is_exhausted(self):
         service = _make_service(_make_mock_client(SAMPLE_GEMINI_NO_UI_RESPONSE))
         large_diff = (
-            "diff --git a/big.tsx b/big.tsx\n" + ("+ added line\n" * 1000)
+            "diff --git a/big.tsx b/big.tsx\n" + ("+ added line\n" * (MAX_DIFF_CHARS // 10))
             + "diff --git a/small.tsx b/small.tsx\n+ tail line\n"
         )
 
@@ -579,12 +579,72 @@ class TestCliGitHelpers:
 
         with patch.object(qa_test_generator_cli, "get_commit_sha", return_value="head-sha"), \
                 patch.object(qa_test_generator_cli, "get_git_diff", return_value=SAMPLE_UI_DIFF), \
+                patch.object(qa_test_generator_cli, "find_declared_routes", return_value=[]), \
                 patch("sys.argv", ["qa-test-gen"]):
             assert qa_test_generator_cli.main() == 0
 
         service.cache_key.assert_called_once_with(SAMPLE_UI_DIFF, "")
         assert service.load_cached_plan.call_args.args[0] == "diff-key"
         service.generate_test_plan.assert_not_called()
+
+
+# --- Test: Declared routes ---
+
+class TestDeclaredRoutes:
+    """The plan gets the app's real routes, so it does not start on a route that renders nothing."""
+
+    def test_finds_absolute_routes_in_tracked_source(self, tmp_path, monkeypatch):
+        import subprocess
+        from automation.qa_test_generator_cli import find_declared_routes
+
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "App.jsx").write_text(
+            '<Route exact path="/" element={<Home />} />\n'
+            '<Route path="/posts/:id" element={<Posts />} />\n'
+            '<Route path={"/admin"} element={<Admin />} />\n'
+            '<Route path="child" element={<Child />} />\n'
+            'const filePath = "/tmp/not-a-route";\n'
+        )
+        (tmp_path / "src" / "routes.ts").write_text("export default [{ path: '/music', component: Music }];\n")
+        (tmp_path / "README.md").write_text('path="/docs-only"\n')
+        (tmp_path / "ignored.jsx").write_text('<Route path="/untracked" />\n')
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "add", "src", "README.md"], cwd=tmp_path, check=True)
+        monkeypatch.chdir(tmp_path)
+
+        assert find_declared_routes() == ["/", "/admin", "/music", "/posts/:id"]
+
+    def test_outside_a_git_repository_finds_nothing(self, tmp_path, monkeypatch):
+        from automation.qa_test_generator_cli import find_declared_routes
+
+        monkeypatch.chdir(tmp_path)
+        assert find_declared_routes() == []
+
+    def test_context_lists_routes_after_the_caller_context(self):
+        from automation.qa_test_generator_cli import build_context
+
+        assert build_context("", []) == ""
+        assert build_context("Extra.", []) == "Extra."
+        assert build_context("Extra.", ["/", "/admin"]) == "Extra.\n\nDeclared routes:\n- /\n- /admin"
+
+    @patch("automation.core.get_diff_test_generator_service")
+    def test_main_generates_and_caches_with_the_routes(self, mock_factory):
+        from automation import qa_test_generator_cli
+
+        service = mock_factory.return_value
+        service.cache_key.return_value = "diff-key"
+        service.load_cached_plan.return_value = None
+        service.generate_test_plan.return_value = TestPlan(commit_sha="head-sha", source="gemini")
+
+        with patch.object(qa_test_generator_cli, "get_commit_sha", return_value="head-sha"), \
+                patch.object(qa_test_generator_cli, "get_git_diff", return_value=SAMPLE_UI_DIFF), \
+                patch.object(qa_test_generator_cli, "find_declared_routes", return_value=["/admin"]), \
+                patch("sys.argv", ["qa-test-gen"]):
+            assert qa_test_generator_cli.main() == 0
+
+        context = "Declared routes:\n- /admin"
+        service.cache_key.assert_called_once_with(SAMPLE_UI_DIFF, context)
+        assert service.generate_test_plan.call_args.kwargs["component_context"] == context
 
 
 # --- Test: Degraded plans are not cached ---

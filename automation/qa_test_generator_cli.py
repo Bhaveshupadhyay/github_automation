@@ -10,6 +10,7 @@ supports commit-SHA-based caching for deterministic re-runs.
 import argparse
 import json
 import logging
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -53,6 +54,48 @@ def get_git_diff(base_branch: str = "origin/main") -> str:
         raise RuntimeError("git diff command timed out after 30 seconds.") from e
     except FileNotFoundError as e:
         raise RuntimeError("git binary not found. Ensure git is installed and on PATH.") from e
+
+
+# `<Route path="/admin">`, `path={"/admin"}`, `{ path: '/admin' }`: absolute routes declared in
+# the app's source. Relative child routes and file-system routers are not covered.
+ROUTE_PATTERN = re.compile(r"""\bpath\s*[:=]\s*\{?\s*["'`](/[^"'`\s]*)["'`]""")
+ROUTE_SOURCE_SUFFIXES = (".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte")
+MAX_ROUTES = 100
+
+
+def find_declared_routes() -> list:
+    """Returns the absolute routes declared in the git-tracked source under the current directory.
+
+    The diff shows only the routes a change touches, so without this the plan guesses an
+    entry route (such as "/home") that the app does not have and tests a blank page.
+    """
+    try:
+        result = subprocess.run(["git", "ls-files"], capture_output=True, text=True, timeout=30)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.warning(f"Could not list source files for routes: {e}")
+        return []
+    if result.returncode != 0:
+        logger.warning(f"Could not list source files for routes: {result.stderr.strip()}")
+        return []
+
+    routes = set()
+    for name in result.stdout.splitlines():
+        if not name.endswith(ROUTE_SOURCE_SUFFIXES):
+            continue
+        try:
+            text = Path(name).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        routes.update(ROUTE_PATTERN.findall(text))
+    return sorted(routes)[:MAX_ROUTES]
+
+
+def build_context(extra_context: str, routes: list) -> str:
+    """Joins the caller's context with the app's declared routes, when any were found."""
+    parts = [extra_context.strip()] if extra_context.strip() else []
+    if routes:
+        parts.append("Declared routes:\n" + "\n".join(f"- {route}" for route in routes))
+    return "\n\n".join(parts)
 
 
 def get_commit_sha() -> str:
@@ -135,7 +178,11 @@ def main():
     if not diff.strip():
         logger.warning("Empty diff detected. Generating baseline smoke test plan.")
 
-    cache_key = service.cache_key(diff, args.context)
+    routes = find_declared_routes()
+    logger.info(f"Declared routes found: {len(routes)}")
+    context = build_context(args.context, routes)
+
+    cache_key = service.cache_key(diff, context)
 
     # Step 2: Check cache
     cached_plan = service.load_cached_plan(cache_key, args.cache_dir)
@@ -151,7 +198,7 @@ def main():
         plan = service.generate_test_plan(
             diff=diff,
             commit_sha=commit_sha,
-            component_context=args.context,
+            component_context=context,
         )
 
         # Step 4: Cache the result, unless generation degraded to a fallback.
