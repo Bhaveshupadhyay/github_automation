@@ -9,6 +9,8 @@ import { createLlmProvider } from "./src/providers/llmFactory.js";
 import { IntentService } from "./src/services/intentService.js";
 import { SlackService } from "./src/services/slackService.js";
 import { GithubService } from "./src/services/githubService.js";
+import { verifyGithubSignature, evaluatePullRequestEvent } from "./src/services/githubWebhookService.js";
+import { QaTargetRegistryService } from "./src/services/qaTargetRegistryService.js";
 
 const OWNER_REPO_REGEX = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
@@ -62,6 +64,13 @@ export default {
     }
 
     const rawBody = await request.text();
+
+    // GitHub pull request webhooks from repositories under QA. Routed before the Slack
+    // check, and authenticated with their own signature.
+    const githubEvent = request.headers.get("x-github-event");
+    if (githubEvent) {
+      return handleGithubWebhook(request, rawBody, githubEvent, env);
+    }
 
     // Verify Slack Request Signature
     const isValid = await verifySlackSignature(request, rawBody, env.SLACK_SIGNING_SECRET);
@@ -237,5 +246,50 @@ async function handleSlackThreadReply(event, env, slackService, githubService) {
       "❌ *Error:* Failed to dispatch resumed workflow to GitHub Actions.",
       threadTs
     );
+  }
+}
+
+// Shared across requests within an isolate, so the registry cache survives between webhooks.
+let qaTargetRegistryService = null;
+
+/**
+ * Starts a QA pipeline run on github_automation for a pull request in a registered
+ * repository. Responds with what was decided, so GitHub's webhook delivery log shows it.
+ */
+async function handleGithubWebhook(request, rawBody, githubEvent, env) {
+  const signature = request.headers.get("x-hub-signature-256");
+  if (!(await verifyGithubSignature(rawBody, signature, env.GITHUB_WEBHOOK_SECRET))) {
+    console.warn("Unauthorized request: GitHub webhook signature verification failed.");
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  if (githubEvent === "ping") {
+    return new Response("pong", { status: 200 });
+  }
+
+  try {
+    const payload = JSON.parse(rawBody);
+    qaTargetRegistryService ??= new QaTargetRegistryService(
+      env.GITHUB_PAT,
+      env.WORKFLOW_REPO_OWNER,
+      env.WORKFLOW_REPO_NAME
+    );
+    const registry = await qaTargetRegistryService.getRegistry();
+    const decision = evaluatePullRequestEvent(githubEvent, payload, registry);
+
+    if (!decision.dispatch) {
+      console.log(`[QA Webhook] ${decision.reason}`);
+      return new Response(decision.reason, { status: 200 });
+    }
+
+    const githubService = new GithubService(env.GITHUB_PAT, env.WORKFLOW_REPO_OWNER, env.WORKFLOW_REPO_NAME);
+    const dispatched = await githubService.dispatchEvent(decision.eventType, decision.clientPayload);
+    if (!dispatched) {
+      return new Response("Failed to dispatch the QA pipeline.", { status: 502 });
+    }
+    return new Response(`Dispatched ${decision.eventType}.`, { status: 202 });
+  } catch (err) {
+    console.error("[QA Webhook] Error:", err);
+    return new Response(`Worker Error: ${err.message}`, { status: 500 });
   }
 }

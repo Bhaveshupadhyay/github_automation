@@ -1,0 +1,11 @@
+{
+  "targets": {
+    "Bhaveshupadhyay/hiphopboombox_web": {
+      "platform": "web",
+      "backend_repo": "Bhaveshupadhyay/hiphomboombox_backend",
+      "backend_default_branch": "main",
+      "require_label": "qa-preview",
+      "frontend_url": "http://localhost:5173"
+    }
+  }
+}

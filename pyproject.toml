@@ -40,6 +40,7 @@ qa-test-gen = "automation.qa_test_generator_cli:main"
 qa-run = "automation.qa_test_runner_cli:main"
 qa-media = "automation.qa_media_processor_cli:main"
 qa-publish = "automation.qa_publish_cli:main"
+qa-pr-context = "automation.qa_pr_context_cli:main"
 
 
 [build-system]
