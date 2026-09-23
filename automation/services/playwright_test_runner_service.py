@@ -1,3 +1,4 @@
+import inspect
 import logging
 import os
 import time
@@ -22,6 +23,57 @@ def _assertion_locator(page, assertion: TestAssertion):
     return page.get_by_text(assertion.target).or_(page.get_by_label(assertion.target)).first
 
 
+# Plan targets are the text a user sees: a link's text, a field's label or placeholder, one of
+# a dropdown's options. Each helper accepts every such name, since plain markup often has no
+# label. An exact match wins over a partial one ("Title" is not the "Search by title" box), and
+# only a visible element counts: a nav link can render once per viewport.
+def _best_match(build, grace_ms=2000):
+    """The first visible exact match of build(exact), else the first visible partial match.
+
+    The exact match gets grace_ms to render first, so a partial match already on the page
+    ("Save draft") is not chosen over the exact one about to appear ("Save").
+    """
+    exact = build(True).filter(visible=True).first
+    try:
+        exact.wait_for(state="visible", timeout=grace_ms)
+        return exact
+    except Exception:
+        return build(False).filter(visible=True).first
+
+
+def _clickable(page, target):
+    """A button or link by its accessible name: its text, aria-label, or (icon-only) title."""
+    return _best_match(lambda exact: (
+        page.get_by_role("button", name=target, exact=exact)
+        .or_(page.get_by_role("link", name=target, exact=exact))
+    ))
+
+
+def _text_field(page, target):
+    """A text field by its label, placeholder, or accessible name."""
+    return _best_match(lambda exact: (
+        page.get_by_label(target, exact=exact)
+        .or_(page.get_by_placeholder(target, exact=exact))
+        .or_(page.get_by_role("textbox", name=target, exact=exact))
+        .or_(page.get_by_role("searchbox", name=target, exact=exact))
+    ))
+
+
+def _dropdown(page, target):
+    """A dropdown by its label, or an unlabelled <select> by the text of one of its options."""
+    return _best_match(lambda exact: (
+        page.get_by_label(target, exact=exact)
+        .or_(page.get_by_role("combobox", name=target, exact=exact))
+        .or_(page.locator("select").filter(has=page.get_by_role("option", name=target, exact=exact)))
+    ))
+
+
+# Written into generated scripts, so they find elements exactly as execute() does.
+_LOCATOR_HELPERS_SOURCE = "\n\n".join(
+    inspect.getsource(fn) for fn in (_best_match, _clickable, _text_field, _dropdown)
+)
+
+
 class PlaywrightTestRunnerService(ITestRunnerService):
     """Playwright-based implementation of the test runner service for web applications."""
 
@@ -44,6 +96,8 @@ class PlaywrightTestRunnerService(ITestRunnerService):
                 f.write('import os\n\n')
                 f.write('from playwright.sync_api import sync_playwright, expect\n\n')
                 f.write('BASE_URL = os.environ.get("QA_BASE_URL", "http://localhost:3000")\n\n\n')
+                f.write(_LOCATOR_HELPERS_SOURCE)
+                f.write('\n\n')
                 f.write(f'def test_journey_{i}():\n')
                 f.write('    with sync_playwright() as p:\n')
                 f.write('        browser = p.chromium.launch()\n')
@@ -60,16 +114,13 @@ class PlaywrightTestRunnerService(ITestRunnerService):
                     if action.action_type == ActionType.NAVIGATE:
                         f.write(f'        page.goto({target})\n')
                     elif action.action_type == ActionType.CLICK:
-                        f.write('        try:\n')
-                        f.write(f'            page.get_by_role("button", name={target}).click(timeout=2000)\n')
-                        f.write('        except Exception:\n')
-                        f.write(f'            page.get_by_role("link", name={target}).click()\n')
+                        f.write(f'        _clickable(page, {target}).click()\n')
                     elif action.action_type == ActionType.FILL:
-                        f.write(f'        page.get_by_label({target}).fill({value})\n')
+                        f.write(f'        _text_field(page, {target}).fill({value})\n')
                     elif action.action_type == ActionType.SCROLL:
                         f.write('        page.mouse.wheel(0, 500)\n')
                     elif action.action_type == ActionType.SELECT:
-                        f.write(f'        page.get_by_label({target}).select_option({value})\n')
+                        f.write(f'        _dropdown(page, {target}).select_option({value})\n')
                     elif action.action_type == ActionType.WAIT:
                         # target = what to wait for, duration_ms = its timeout;
                         # duration_ms alone is a fixed wait
@@ -159,16 +210,13 @@ class PlaywrightTestRunnerService(ITestRunnerService):
                                     url = f"{config.base_url.rstrip('/')}/{url.lstrip('/')}"
                                 page.goto(url, timeout=config.timeout_ms)
                             elif action.action_type == ActionType.CLICK:
-                                try:
-                                    page.get_by_role("button", name=action.target).click(timeout=5000)
-                                except Exception:
-                                    page.get_by_role("link", name=action.target).click(timeout=5000)
+                                _clickable(page, action.target).click(timeout=config.timeout_ms)
                             elif action.action_type == ActionType.FILL:
-                                page.get_by_label(action.target).fill(action.value, timeout=config.timeout_ms)
+                                _text_field(page, action.target).fill(action.value, timeout=config.timeout_ms)
                             elif action.action_type == ActionType.SCROLL:
                                 page.mouse.wheel(0, 500)
                             elif action.action_type == ActionType.SELECT:
-                                page.get_by_label(action.target).select_option(action.value, timeout=config.timeout_ms)
+                                _dropdown(page, action.target).select_option(action.value, timeout=config.timeout_ms)
                             elif action.action_type == ActionType.WAIT:
                                 if action.target:
                                     expect(page.get_by_text(action.target).first).to_be_visible(
