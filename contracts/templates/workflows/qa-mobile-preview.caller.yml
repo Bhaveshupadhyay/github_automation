@@ -1,0 +1,33 @@
+# Copy to .github/workflows/qa-mobile-preview.yml in a mobile repository.
+#
+# Mobile runs are slower and less reliable than web runs on hosted runners, so the label
+# gate is worth keeping longer here than on the web pipeline.
+
+name: QA Mobile Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+concurrency:
+  group: qa-mobile-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  qa:
+    if: contains(github.event.pull_request.labels.*.name, 'qa-preview')
+    uses: bhaveshupadhyay/github_automation/.github/workflows/qa-mobile-preview.yml@main
+    with:
+      backend-repo: your-org/your-backend
+      backend-default-branch: dev
+      # 10.0.2.2 is the runner's localhost as seen from inside the Android emulator.
+      api-base-url: http://10.0.2.2:8000
+    secrets:
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      BACKEND_TOKEN: ${{ secrets.BACKEND_TOKEN }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
