@@ -37,12 +37,13 @@ jobs:
 5. Resolve the backend branch (explicit declaration → matching remote head → default).
 6. Checkout the backend at the resolved branch.
 7. Key-drift check on the backend.
-8. Decrypt `.env.qa.enc`; export and mask only the storage keys.
+8. Check that `.env.qa.enc` decrypts, failing fast on a bad key. Nothing is exported to the job.
 9. Start the database, backend and frontend; wait for both health probes.
 10. Generate the test plan from the diff, reusing the cached plan when the diff is unchanged.
 11. Execute the journeys, recording video.
 12. Compress the recording and build the preview GIF.
-13. Publish the single in-place PR comment; upload artifacts if storage degraded.
+13. Load the storage credentials (GitHub secrets over `.env.qa.enc`) inside the publish step only,
+    then publish the single in-place PR comment; upload artifacts if storage degraded.
 14. Stop the services and shred the decrypted environment.
 15. Re-assert the test verdict as the job's verdict.
 
@@ -103,7 +104,9 @@ plan is regenerated even when the diff content already has an entry.
 
 `SOPS_AGE_KEY` is the only required secret. The backend environment is decrypted from the
 `.env.qa.enc` committed beside the code. Cloudflare R2 credentials can live either there or
-in GitHub Actions secrets; when both are set, the GitHub secret wins.
+in GitHub Actions secrets; when both are set, the GitHub secret wins. Either way they are loaded
+inside the publish step alone, never exported to the job, because earlier steps run the pull
+request's own code.
 
 | Secret | Required | Absent behaviour |
 | :--- | :--- | :--- |
