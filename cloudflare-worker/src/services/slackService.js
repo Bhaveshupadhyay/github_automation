@@ -1,3 +1,6 @@
+// Bounds the thread scan for a request header: 10 pages of 200 messages.
+const MAX_THREAD_PAGES = 10;
+
 /**
  * Service to handle Slack messaging and thread replies context retrieval.
  */
@@ -58,32 +61,35 @@ export class SlackService {
     }
 
     try {
-      const queryParams = new URLSearchParams({
-        channel: channel,
-        ts: threadTs,
-        limit: "10"
-      });
+      // The first Repo and Prompt markers in the thread. They can sit in different messages:
+      // a request that named no repository gets its Repo marker when the reply supplies one.
+      // A request made deep in a long thread has its header on a later page.
+      let parentRepo = "";
+      let parentPrompt = "";
+      let cursor = "";
+      for (let page = 0; page < MAX_THREAD_PAGES && !(parentRepo && parentPrompt); page++) {
+        const queryParams = new URLSearchParams({ channel, ts: threadTs, limit: "200" });
+        if (cursor) queryParams.set("cursor", cursor);
 
-      const res = await fetch(
-        `https://slack.com/api/conversations.replies?${queryParams.toString()}`,
-        { headers: { "Authorization": `Bearer ${this.botToken}` } }
-      );
+        const res = await fetch(
+          `https://slack.com/api/conversations.replies?${queryParams.toString()}`,
+          { headers: { "Authorization": `Bearer ${this.botToken}` } }
+        );
+        const data = await res.json();
+        if (!data.ok || !Array.isArray(data.messages)) break;
 
-      const data = await res.json();
-      if (data.ok && Array.isArray(data.messages)) {
-        // The first Repo and Prompt markers in the thread. They can sit in different messages:
-        // a request that named no repository gets its Repo marker when the reply supplies one.
-        let parentRepo = "";
-        let parentPrompt = "";
         for (const msg of data.messages) {
           const text = msg.text || "";
           parentRepo ||= text.match(/Repo:\*\s*`([^`]+)`/)?.[1] || "";
           parentPrompt ||= text.match(/Prompt:\*\s*`([^`]+)`/)?.[1] || "";
         }
 
-        if (parentRepo || parentPrompt) {
-          return { parentRepo, parentPrompt: parentPrompt || "Previous Coding Request" };
-        }
+        cursor = data.response_metadata?.next_cursor || "";
+        if (!cursor) break;
+      }
+
+      if (parentRepo || parentPrompt) {
+        return { parentRepo, parentPrompt: parentPrompt || "Previous Coding Request" };
       }
     } catch (err) {
       console.error("[SlackService] Error fetching thread parent:", err);

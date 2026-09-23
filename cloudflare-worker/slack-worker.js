@@ -13,6 +13,8 @@ import { QaTargetRegistryService } from "./src/services/qaTargetRegistryService.
 import { QaRequestService } from "./src/services/qaRequestService.js";
 import { parseTargetRepo } from "./src/services/targetRepoParser.js";
 
+const USAGE =
+  "👋 Tell me what to change and where, e.g. `target repo: owner/repo add an admin panel`.";
 const REPO_QUESTION =
   "❓ *Antigravity AI Clarification:* Which repository should I work in? Reply in this thread with `owner/repo`.";
 
@@ -192,6 +194,12 @@ async function handleCommandOrMention(text, channelId, userId, threadTs, parentT
     }
   }
 
+  // A bare mention gives no thread anything to resume from, so it gets usage instead.
+  if (!repo && !prompt) {
+    await slackService.postMessage(channelId, USAGE, threadTs);
+    return;
+  }
+
   let currentThreadTs = threadTs;
 
   // The thread-reply path resumes from the Repo and Prompt markers in this header, so it is
@@ -269,7 +277,11 @@ async function handleSlackThreadReply(event, env, intentService, slackService, g
     return;
   }
 
-  const targetRepo = parentRepo || parseTargetRepo(userReply.replace(/<@[A-Z0-9]+>/g, "")).repo;
+  const named = parseTargetRepo(userReply.replace(/<@[A-Z0-9]+>/g, ""));
+  if (!named.repo && !named.prompt) {
+    return;
+  }
+  const targetRepo = parentRepo || named.repo;
 
   // A QA request is not a coding clarification. QA starts only when the bot is tagged,
   // which the app_mention path handles; resuming the coding run here would change code.
@@ -279,6 +291,15 @@ async function handleSlackThreadReply(event, env, intentService, slackService, g
   }
   if (!targetRepo) {
     await slackService.postMessage(channelId, REPO_QUESTION, threadTs);
+    return;
+  }
+  // The thread stays tied to its repository; another one is a new request, not a clarification.
+  if (named.explicit && named.repo.toLowerCase() !== targetRepo.toLowerCase()) {
+    await slackService.postMessage(
+      channelId,
+      `⚠️ This thread is working in \`${targetRepo}\`. To work in \`${named.repo}\`, tag me in a new message outside this thread.`,
+      threadTs
+    );
     return;
   }
 

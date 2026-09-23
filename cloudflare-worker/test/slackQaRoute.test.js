@@ -153,3 +153,41 @@ test("a tagged answer to the repository question resumes the request once", asyn
   assert.equal(dispatches[0].client_payload.target_repo, "acme/web");
   assert.ok(postsOf(calls).every(p => !p.text.includes("What should I change")));
 });
+
+test("a bare mention gets usage, not a thread that cannot resume", async () => {
+  const calls = mockServices("CODE_DEVELOPMENT");
+  await run({ type: "app_mention", text: "<@UBOT>", channel: "C1", ts: "600.0" });
+  assert.deepEqual(dispatchesOf(calls), []);
+  const posts = postsOf(calls);
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].text, /Tell me what to change and where/);
+});
+
+test("a reply naming another repository does not run in the thread's repository", async () => {
+  const calls = mockServices("CODE_DEVELOPMENT", BOT_THREAD);
+  await run({ type: "message", text: "repo: acme/api add a footer", channel: "C1", ts: "700.0", thread_ts: "100.1" });
+  assert.deepEqual(dispatchesOf(calls), []);
+  assert.match(postsOf(calls)[0].text, /working in `acme\/web`\. To work in `acme\/api`/);
+});
+
+test("a request header on a later page of the thread is still found", async () => {
+  const calls = [];
+  const pages = {
+    "": { ok: true, messages: [{ ts: "1.0", text: "chatter" }], response_metadata: { next_cursor: "p2" } },
+    p2: { ok: true, messages: [{ ts: "2.0", bot_id: "B1", text: "🤖 *Antigravity AI Request Received*\n📦 *Repo:* `acme/web`\n📌 *Prompt:* `add a footer`" }] },
+  };
+  globalThis.fetch = async (url, init = {}) => {
+    const href = String(url);
+    calls.push({ url: href, init });
+    if (href.includes("generativelanguage.googleapis.com")) {
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ intent: "CODE_DEVELOPMENT" }) }] } }] });
+    }
+    if (href.includes("conversations.replies")) return Response.json(pages[new URL(href).searchParams.get("cursor") || ""]);
+    if (href.includes("chat.postMessage")) return Response.json({ ok: true, ts: "9.9" });
+    if (href.endsWith("/dispatches")) return new Response(null, { status: 204 });
+    return new Response("unexpected", { status: 500 });
+  };
+  await run({ type: "message", text: "make it blue", channel: "C1", ts: "800.0", thread_ts: "1.0" });
+  const [dispatch] = dispatchesOf(calls);
+  assert.equal(dispatch.client_payload.target_repo, "acme/web");
+});

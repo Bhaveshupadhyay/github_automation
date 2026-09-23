@@ -1,16 +1,19 @@
 const SLUG = "[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+";
-// Slack wraps links as <url|label>; people wrap slugs in quotes or backticks.
-const WRAPPED = "[<`'\"‘’“”]*(?:(?:https?:\\/\\/)?(?:www\\.)?github\\.com\\/)?";
+const OPENERS = "[<`'\"‘’“”]*";
+// A GitHub link may run on (/pull/5, |label>); a bare owner/repo may only carry a PR number
+// and closing quotes, so a file path such as src/components/Button.jsx is not a repository.
+const REFERENCE =
+  `${OPENERS}(?:(?:https?:\\/\\/)?(?:www\\.)?github\\.com\\/(${SLUG})[^\\s]*|(${SLUG})(?:#\\d+)?[\`'"‘’“”>]*(?=\\s|$))`;
 
 // "target repo: owner/repo", "target repository owner/repo", "repo = owner/repo".
 // A bare "repo" needs the colon, so prose like "the repo and/or docs" is not a label.
 const LABELED_PATTERN = new RegExp(
-  `\\b(?:target\\s+repo(?:sitory)?\\s*[:=]?|repo(?:sitory)?\\s*[:=])\\s*${WRAPPED}(${SLUG})[^\\s]*`,
+  `\\b(?:target\\s+repo(?:sitory)?\\s*[:=]?|repo(?:sitory)?\\s*[:=])\\s*${REFERENCE}`,
   "i"
 );
 // "owner/repo do something" (the original `/code [owner/repo] <prompt>` form), or a bare
 // "owner/repo" answering the bot's repository question.
-const LEADING_PATTERN = new RegExp(`^${WRAPPED}(${SLUG})[^\\s]*(?=\\s|$)`);
+const LEADING_PATTERN = new RegExp(`^${REFERENCE}`);
 // A GitHub link anywhere in the message.
 const GITHUB_URL_PATTERN = new RegExp(`https?:\\/\\/(?:www\\.)?github\\.com\\/(${SLUG})`, "i");
 
@@ -28,28 +31,31 @@ const PROSE_SLASHES = new Set([
  */
 function cleanSlug(slug) {
   const [owner, name] = slug.split("/");
-  return `${owner}/${name.replace(/\.git$/i, "").replace(/\.+$/, "")}`;
+  return `${owner}/${name.replace(/\.+$/, "").replace(/\.git$/i, "")}`;
 }
 
 /**
  * Finds the repository a Slack request targets and the prompt without it.
  * Returns an empty `repo` when the message names none, so the caller asks for one.
+ * `explicit` is true when the repository was labeled or led the message, rather than
+ * inferred from a GitHub link mentioned in passing.
  *
  * @param {string} text
- * @returns {{ repo: string, prompt: string }}
+ * @returns {{ repo: string, prompt: string, explicit: boolean }}
  */
 export function parseTargetRepo(text) {
   const message = text.trim();
 
   for (const pattern of [LABELED_PATTERN, LEADING_PATTERN]) {
     const match = message.match(pattern);
-    if (match && !PROSE_SLASHES.has(match[1].toLowerCase())) {
+    const slug = match && (match[1] || match[2]);
+    if (slug && !PROSE_SLASHES.has(slug.toLowerCase())) {
       const prompt = message.replace(match[0], " ").replace(/^[\s,;:.-]+/, "");
-      return { repo: cleanSlug(match[1]), prompt: prompt.replace(/\s+/g, " ").trim() };
+      return { repo: cleanSlug(slug), prompt: prompt.replace(/\s+/g, " ").trim(), explicit: true };
     }
   }
 
   // A link is part of the request ("fix the bug in <url>"), so it stays in the prompt.
   const url = message.match(GITHUB_URL_PATTERN);
-  return { repo: url ? cleanSlug(url[1]) : "", prompt: message.replace(/\s+/g, " ") };
+  return { repo: url ? cleanSlug(url[1]) : "", prompt: message.replace(/\s+/g, " "), explicit: false };
 }
