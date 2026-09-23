@@ -1,8 +1,8 @@
 """Domain models for the repositories the central QA pipeline serves.
 
-The pipeline runs in this repository and reaches out to the repositories it tests, so
-which repositories it serves, and how each pairs with its backend, is recorded here
-rather than in a caller workflow inside each of them.
+The pipeline runs in this repository, when a user asks the Slack bot to QA-test a pull
+request. Which repositories it serves, and how each pairs with its backend, is recorded
+here rather than in the repositories under test.
 """
 from enum import Enum
 from typing import Dict, Optional
@@ -23,11 +23,9 @@ class QATarget(BaseModel):
     platform: QAPlatform = Field(..., description="Pipeline that previews this repository's pull requests")
     backend_repo: str = Field(..., pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", description="Paired backend as owner/name")
     backend_default_branch: str = Field("main", description="Backend branch used when the PR declares none and no head matches")
-    require_label: Optional[str] = Field(
-        "qa-preview",
-        description="Label a PR must carry to be previewed. Null previews every PR (general availability).",
+    slack_channel: Optional[str] = Field(
+        None, description="Slack channel for results of a manual re-run. A Slack request replies in its own thread."
     )
-    slack_channel: Optional[str] = Field(None, description="Slack channel for the result notification")
     db_strategy: str = Field("auto", pattern=r"^(auto|cloud_dev|ephemeral_container)$")
     startup_timeout_seconds: int = Field(420, gt=0)
     python_version: str = Field("3.12")

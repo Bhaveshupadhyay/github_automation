@@ -1,9 +1,10 @@
 name: QA Mobile Preview
 
-# Central pipeline for mobile pull requests opened in other repositories. A pull request
-# webhook reaches the Cloudflare Worker, which sends a `qa_mobile_preview` repository
-# dispatch here; this run boots the paired backend, builds the debug binary against it,
-# records Maestro journeys on an emulator, and reports on the pull request.
+# Central pipeline for mobile pull requests opened in other repositories. It runs only
+# when someone tags the Slack bot and asks for QA: the Cloudflare Worker sends a
+# `qa_mobile_preview` repository dispatch here; this run boots the paired backend, builds
+# the pull request's debug binary against it, records Maestro journeys on an emulator,
+# and reports on the pull request and in the Slack thread that asked.
 #
 # The backend is reached at 10.0.2.2 rather than localhost, because inside an Android
 # emulator localhost is the emulator itself.
@@ -47,6 +48,10 @@ permissions:
 env:
   PR_REPOSITORY: ${{ github.event.client_payload.repository || inputs.repository }}
   PR_NUMBER: ${{ github.event.client_payload.pr_number || inputs.pr_number }}
+  # The Slack thread the request came from, so results are posted back into it. Empty on
+  # a manual re-run.
+  REQUEST_SLACK_CHANNEL: ${{ github.event.client_payload.slack_channel }}
+  REQUEST_SLACK_THREAD: ${{ github.event.client_payload.slack_thread_ts }}
 
 jobs:
   # Reads the pull request fresh from the API and pairs it with its registered backend.
@@ -104,9 +109,29 @@ jobs:
         if: steps.pr.outputs.skip == 'true'
         env:
           REASON: ${{ steps.pr.outputs.skip_reason }}
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           echo "::notice::QA preview skipped: $REASON"
           echo "QA preview skipped: $REASON" >> "$GITHUB_STEP_SUMMARY"
+          export SLACK_CHANNEL="$REQUEST_SLACK_CHANNEL" SLACK_THREAD="$REQUEST_SLACK_THREAD"
+          export MESSAGE="⏭️ *QA testing skipped:* $REASON"
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          token, channel = os.getenv("SLACK_TOKEN"), os.getenv("SLACK_CHANNEL")
+          if token and channel:
+              payload = {"channel": channel, "text": os.environ["MESSAGE"]}
+              if os.getenv("SLACK_THREAD"):
+                  payload["thread_ts"] = os.environ["SLACK_THREAD"]
+              req = urllib.request.Request(
+                  "https://slack.com/api/chat.postMessage",
+                  data=json.dumps(payload).encode(),
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+              )
+              try:
+                  urllib.request.urlopen(req, timeout=10).read()
+              except Exception as e:
+                  print(f"::warning::Slack notice not sent: {e}")
+          EOF
 
       # Which backend branch belongs to this PR: explicit declaration, then a matching
       # remote head, then the registered default branch.
@@ -508,6 +533,36 @@ jobs:
           name: qa-context-${{ github.run_id }}
           path: qa-results
 
+      # The run stopped before any test executed — checkout, startup or plan generation.
+      # The requester still hears about it in the thread that asked.
+      - name: Tell the requester the run stopped early
+        if: hashFiles('qa-results/run.json') == ''
+        env:
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.slack_channel || needs.resolve.outputs.slack_channel }}
+          SLACK_THREAD: ${{ github.event.client_payload.slack_thread_ts }}
+          TARGET_REPO: ${{ needs.resolve.outputs.repository }}
+          TARGET_PR: ${{ needs.resolve.outputs.pr_number }}
+        run: |
+          export MESSAGE="❌ *QA testing for ${TARGET_REPO}#${TARGET_PR} stopped before any test ran.* Logs: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          token, channel = os.getenv("SLACK_TOKEN"), os.getenv("SLACK_CHANNEL")
+          if token and channel:
+              payload = {"channel": channel, "text": os.environ["MESSAGE"]}
+              if os.getenv("SLACK_THREAD"):
+                  payload["thread_ts"] = os.environ["SLACK_THREAD"]
+              req = urllib.request.Request(
+                  "https://slack.com/api/chat.postMessage",
+                  data=json.dumps(payload).encode(),
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+              )
+              try:
+                  urllib.request.urlopen(req, timeout=10).read()
+              except Exception as e:
+                  print(f"::warning::Slack notice not sent: {e}")
+          EOF
+
       - name: Publish the QA comment
         id: qa_publish
         env:
@@ -515,7 +570,8 @@ jobs:
           # GITHUB_TOKEN is scoped to github_automation and cannot.
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL: ${{ needs.resolve.outputs.slack_channel }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.slack_channel || needs.resolve.outputs.slack_channel }}
+          SLACK_THREAD: ${{ github.event.client_payload.slack_thread_ts }}
           QA_ARTIFACT_DIR: ${{ github.workspace }}/qa-artifacts
           TARGET_REPO: ${{ needs.resolve.outputs.repository }}
           TARGET_PR: ${{ needs.resolve.outputs.pr_number }}
@@ -527,13 +583,14 @@ jobs:
           R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
         run: |
           set -euo pipefail
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           if [ ! -f "$RESULTS_DIR/run.json" ]; then
             echo "::warning::No test result was written; nothing to publish."
             exit 0
           fi
           # An unset secret or output arrives as an empty string, which the storage and
           # Slack configuration would read as a value rather than as absent.
-          for key in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_PUBLIC_BASE_URL SLACK_CHANNEL; do
+          for key in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_PUBLIC_BASE_URL SLACK_CHANNEL SLACK_THREAD; do
             [ -n "${!key:-}" ] || unset "$key"
           done
           uv run --project "$TOOLING_DIR" qa-publish \
@@ -543,7 +600,7 @@ jobs:
             --test-result "$RESULTS_DIR/run.json" \
             --media-result "$RESULTS_DIR/media.json" \
             --branch-result "$RESULTS_DIR/branch.json" \
-            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            --run-url "$RUN_URL"
 
       # Collects whatever the publisher staged when R2 was unavailable. Python cannot
       # upload a workflow artifact itself, so this step completes that fallback.

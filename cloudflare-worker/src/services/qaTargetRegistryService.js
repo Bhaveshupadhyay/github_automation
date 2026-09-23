@@ -14,7 +14,7 @@ export class QaTargetRegistryService {
   }
 
   /**
-   * Returns the registry, cached briefly so a burst of webhooks makes one API call.
+   * Returns the registry, cached briefly so a burst of requests makes one API call.
    * @returns {Promise<{targets: Object<string, Object>}>}
    */
   async getRegistry() {

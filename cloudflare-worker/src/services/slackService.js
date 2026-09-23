@@ -91,4 +91,28 @@ export class SlackService {
 
     return { parentRepo: "", parentPrompt: "" };
   }
+
+  /**
+   * Fetches a thread's messages, oldest first.
+   * @param {string} channel
+   * @param {string} threadTs
+   * @returns {Promise<Array<{text?: string}>>}
+   */
+  async fetchThreadMessages(channel, threadTs) {
+    if (!this.botToken) return [];
+
+    try {
+      const queryParams = new URLSearchParams({ channel, ts: threadTs, limit: "200" });
+      const res = await fetch(
+        `https://slack.com/api/conversations.replies?${queryParams.toString()}`,
+        { headers: { "Authorization": `Bearer ${this.botToken}` } }
+      );
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.messages)) return data.messages;
+      console.error("[SlackService] conversations.replies failed:", data.error);
+    } catch (err) {
+      console.error("[SlackService] Error fetching thread messages:", err);
+    }
+    return [];
+  }
 }

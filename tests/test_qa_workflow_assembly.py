@@ -143,6 +143,33 @@ class TestJobStructure(unittest.TestCase):
                 self.assertEqual(handoff["with"]["name"], collect["with"]["name"])
 
 
+class TestSlackRoundTrip(unittest.TestCase):
+    """QA is requested in a Slack thread, so every outcome is answered in that thread."""
+
+    def test_results_reply_in_the_requesting_thread(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                env = _step(_job(document, "publish"), "Publish the QA comment")["env"]
+                self.assertIn("client_payload.slack_thread_ts", env["SLACK_THREAD"])
+                # The request's channel wins; the registry's is the fallback for manual re-runs.
+                self.assertTrue(env["SLACK_CHANNEL"].startswith("${{ github.event.client_payload.slack_channel ||"))
+
+    def test_a_run_that_never_reached_the_tests_still_reports(self) -> None:
+        """Without it, a startup failure leaves the requester waiting in silence."""
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                publish = _job(document, "publish")
+                early = _step(publish, "stopped early")
+                self.assertIn("hashFiles('qa-results/run.json') == ''", early["if"])
+                self.assertLess(_step_index(publish, "stopped early"), _step_index(publish, "Publish the QA comment"))
+
+    def test_a_skipped_request_is_answered(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                explain = _step(_job(document, "resolve"), "Explain why no preview")
+                self.assertIn("chat.postMessage", explain["run"])
+
+
 class TestSecretIsolation(unittest.TestCase):
     """The pull request's code must never share a runner with credentials that can
     write to it: a malicious step could read them from a later step's process."""

@@ -21,7 +21,10 @@ export class GeminiProvider extends BaseLlmProvider {
     
     const systemInstruction = 
       "You are an intent classifier for an automated AI software developer agent. " +
-      "Analyze the user's request. If the prompt specifies a clear coding task or instruction, " +
+      "Analyze the user's request. If the user asks to QA test, test, verify, or record an existing " +
+      "pull request or its changes (rather than to write or change code), " +
+      `respond with JSON: {"intent": "${IntentType.QA_TESTING}"}.\n` +
+      "If the prompt specifies a clear coding task or instruction, " +
       `respond with JSON: {"intent": "${IntentType.CODE_DEVELOPMENT}"}.\n` +
       "If the prompt is missing vital information (e.g. asking to change an app name without specifying what name to use), " +
       `respond with JSON: {"intent": "${IntentType.CLARIFICATION_NEEDED}", "question": "<1-sentence polite clarification question>"}`;
@@ -47,8 +50,9 @@ export class GeminiProvider extends BaseLlmProvider {
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       if (text) {
         const parsed = JSON.parse(text);
+        const known = [IntentType.QA_TESTING, IntentType.CLARIFICATION_NEEDED];
         return {
-          intent: parsed.intent === IntentType.CLARIFICATION_NEEDED ? IntentType.CLARIFICATION_NEEDED : IntentType.CODE_DEVELOPMENT,
+          intent: known.includes(parsed.intent) ? parsed.intent : IntentType.CODE_DEVELOPMENT,
           question: parsed.question || ""
         };
       }

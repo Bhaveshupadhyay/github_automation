@@ -4,5 +4,6 @@
  */
 export const IntentType = Object.freeze({
   CODE_DEVELOPMENT: "CODE_DEVELOPMENT",
+  QA_TESTING: "QA_TESTING",
   CLARIFICATION_NEEDED: "CLARIFICATION_NEEDED"
 });

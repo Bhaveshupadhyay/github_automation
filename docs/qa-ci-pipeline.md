@@ -1,9 +1,10 @@
 # QA CI Pipeline
 
 The assembled pipeline. Phases 1–5 produced independent CLIs; Phase 6 wired them into two
-GitHub Actions workflows with the guardrails that make them safe to run on every pull
-request. Both workflows run **centrally, in this repository**, for pull requests opened in
-other repositories.
+GitHub Actions workflows with the guardrails that make them safe to run. Both workflows
+run **centrally, in this repository**, for pull requests opened in other repositories, and
+**only when a user asks the Slack bot for QA testing**. Asking the bot to write code opens
+a pull request; it never tests one.
 
 ## Shape
 
@@ -11,19 +12,25 @@ The repositories under test hold no workflow file and no secret. Everything — 
 pipeline, its secrets, its runs and its logs — lives here.
 
 ```
-PR opened / pushed / labelled in a registered repository
-  → GitHub webhook → Cloudflare Worker (verifies the signature, filters forks and labels)
+@bot run QA on this            (in the thread where the bot opened the PR)
+@bot test owner/repo#12        (or any PR, by link or owner/repo#N)
+  → Cloudflare Worker classifies the request as QA_TESTING (Gemini)
+  → finds the PR: named in the message, else the latest PR linked in the thread
   → repository_dispatch `qa_<platform>_preview` on github_automation
   → resolve → qa-preview → publish, all in github_automation's Actions
-  → one comment on the pull request, media in R2
+  → PR branch cloned at its head commit, tests generated, run and recorded
+  → one comment on the pull request, media in R2, reply in the Slack thread
 ```
+
+With no PR named and none in the thread, the bot asks which one to test. A thread reply
+that asks for QA without tagging the bot is ignored rather than resuming the coding run.
 
 | File | Purpose |
 | :--- | :--- |
-| `contracts/qa-targets.json` | Which repositories are served, their platform, backend, label gate and settings |
+| `contracts/qa-targets.json` | Which repositories can be QA-tested, their platform, paired backend and settings |
 | `.github/workflows/qa-web-preview.yml` | Web PRs: Playwright journeys against the paired backend |
 | `.github/workflows/qa-mobile-preview.yml` | Mobile PRs: Maestro flows on an Android emulator |
-| `cloudflare-worker/src/services/githubWebhookService.js` | Webhook signature check and dispatch decision |
+| `cloudflare-worker/src/services/qaRequestService.js` | Finds the PR a Slack QA request means and dispatches the pipeline |
 | `automation/qa_pr_context_cli.py` | `qa-pr-context`: reads the PR fresh from the API and pairs it with its target |
 
 Each workflow also has a `workflow_dispatch` trigger, for re-running a pull request by hand
@@ -44,7 +51,6 @@ Add it to `contracts/qa-targets.json`:
       "platform": "web",
       "backend_repo": "owner/backend",
       "backend_default_branch": "main",
-      "require_label": "qa-preview",
       "frontend_url": "http://localhost:5173"
     }
   }
@@ -56,17 +62,14 @@ Add it to `contracts/qa-targets.json`:
 | `platform` | — | `web` or `mobile`: which pipeline runs |
 | `backend_repo` | — | Backend paired with this repository |
 | `backend_default_branch` | `main` | Used when the PR declares no backend branch and no head matches |
-| `require_label` | `qa-preview` | Label a PR needs to run. `null` runs every PR (general availability) |
-| `slack_channel` | none | Slack channel for the result notification |
+| `slack_channel` | none | Slack channel for a manual re-run's result. A Slack request replies in its own thread |
 | `db_strategy` | `auto` | `auto`, `cloud_dev` or `ephemeral_container` |
 | `startup_timeout_seconds` | `420` | Budget for install, migrations and health probes |
 | `frontend_url`, `node_version` | `http://localhost:3000`, `20` | Web only |
 | `api_base_url`, `android_api_level`, `java_version` | `http://10.0.2.2:8000`, `34`, `17` | Mobile only |
 
 Unknown fields are rejected, so a typo fails loudly instead of falling back to a default.
-Then, in the registered repository, add a webhook: **Settings → Webhooks → Add webhook**,
-payload URL the Worker's URL, content type `application/json`, the secret stored in the
-Worker as `GITHUB_WEBHOOK_SECRET`, and the **Pull requests** event only.
+Nothing is installed in the registered repository: no workflow, no secret, no webhook.
 
 The backend repository still needs its `.env.qa.enc` and `.sops.yaml`, and both
 repositories need a `qa-contract.json`: those describe the application, not the pipeline.
@@ -88,9 +91,11 @@ It then resolves the backend branch (explicit declaration → matching remote he
 7. Execute the journeys, recording video; compress it and build the preview GIF.
 8. Hand the results to `publish` as an artifact; stop the services; re-assert the verdict.
 
-**`publish`** runs on a fresh runner, downloads the results, uploads the media to R2 and
-edits the single PR comment in place. It runs even when `qa-preview` failed, so a red run
-still publishes the recording of its failure.
+**`publish`** runs on a fresh runner, downloads the results, uploads the media to R2,
+edits the single PR comment in place and replies in the Slack thread that asked. It runs
+even when `qa-preview` failed, so a red run still publishes the recording of its failure;
+a run that stopped before any test ran, and a skipped request, are also answered in the
+thread.
 
 ## Guardrails
 
@@ -101,14 +106,14 @@ a file. In `qa-preview` the PAT appears only as a checkout credential, and every
 sets `persist-credentials: false`, so no token is left in `.git/config`.
 
 **Fork safety.** Fork code would run with this repository's secrets, so forks never run.
-The Worker drops fork webhooks, and `qa-pr-context` refuses them again against the API, so
-neither a forged payload nor a manual dispatch can bypass the check.
+`qa-pr-context` refuses them against the API, so neither a Slack request nor a manual
+dispatch can bypass the check.
 
 **Untrusted input.** Dispatch values reach scripts only through the environment and are
 validated before use. The PR body travels as a file, never interpolated into a script.
 
 **Concurrency.** Keyed on repository and PR number, with `cancel-in-progress: true`, so a
-new push cancels the run still testing the old commit, and PR #7 in one repository never
+second request for the same PR cancels the run still testing it, and PR #7 in one repository never
 cancels PR #7 in another. Cancellation is a capacity control, not a correctness guarantee;
 the publisher restores the single-comment invariant itself (Directive 5.A.4).
 
@@ -143,8 +148,8 @@ All in **this repository's** Actions secrets.
 | `GEMINI_API_KEY` | No | `resolve`, `qa-preview` | Test generation falls back to the baseline smoke suite |
 | `SLACK_BOT_TOKEN` | No | `publish` | Slack notification skipped |
 
-The Worker needs `GITHUB_PAT` (to read the registry and send the dispatch) and
-`GITHUB_WEBHOOK_SECRET`. Without the webhook secret every webhook is rejected.
+The Worker needs only what it already has: `GITHUB_PAT` (now also used to read the
+registry) and the Slack and Gemini credentials.
 
 Comments are posted as the PAT's account, which the publisher resolves through `/user` to
 recognise its own previous comment.
@@ -176,15 +181,15 @@ qa-publish --repo org/app --pr 42 --test-result run.json --media-result media.js
 
 `tests/test_qa_workflow_assembly.py` asserts these properties against the parsed YAML:
 trigger shape, job structure, secret isolation, credential persistence, concurrency,
-timeouts, the fork check, step ordering, head-SHA usage and the caches. The Worker's
-webhook handling is covered by `npm run test:worker`.
+timeouts, the fork check, step ordering, head-SHA usage, the Slack round trip and the
+caches. The Worker's QA routing is covered by `npm run test:worker`.
 
 ## Piloting
 
 GitHub runs `repository_dispatch` and `workflow_dispatch` workflows from the **default
-branch**, so webhook-triggered runs use whatever `main` holds. The first end-to-end run
-therefore happens after merge: register the repository, add its webhook, label one real
-pull request `qa-preview`, and check the run in this repository's Actions tab. That run
-exercises the webhook, dispatch, SOPS decryption, branch resolution, health probes, plan
-generation, Playwright, storage and the comment publisher together, and is the first of
-the Phase 7.1 pilot runs.
+branch**, so Slack-requested runs use whatever `main` holds. The first end-to-end run
+therefore happens after merge and a Worker deploy: tag the bot in a thread where it opened
+a pull request on a registered repository, ask it to run QA, and check the run in this
+repository's Actions tab. That run exercises intent routing, dispatch, SOPS decryption,
+branch resolution, health probes, plan generation, Playwright, storage, the comment
+publisher and the Slack reply together, and is the first of the Phase 7.1 pilot runs.

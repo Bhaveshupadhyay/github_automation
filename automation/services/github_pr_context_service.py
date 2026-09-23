@@ -25,8 +25,8 @@ class GitHubPullRequestContextService(IPullRequestContextService):
 
     The dispatch carries only a repository and a number. Everything else — the head
     commit, the branches, the description — is read from the API at run time, so a
-    manual re-run and a webhook-triggered run resolve identically, and a push that
-    landed after the dispatch is tested rather than silently skipped.
+    manual re-run and a Slack-requested run resolve identically, and the PR branch is
+    tested at its latest commit.
     """
 
     def __init__(
@@ -71,8 +71,8 @@ class GitHubPullRequestContextService(IPullRequestContextService):
         if pr.get("state") != "open":
             raise PullRequestSkipped(f"{repository}#{pr_number} is {pr.get('state')}, not open.")
 
-        # A fork's code would run here with this repository's secrets. The webhook
-        # already filters forks; this is the check a manual dispatch cannot bypass.
+        # A fork's code would run here with this repository's secrets. Checked against the
+        # API, so neither a Slack request nor a manual dispatch can bypass it.
         head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name") or ""
         if head_repo.lower() != repository.lower():
             raise PullRequestSkipped(
