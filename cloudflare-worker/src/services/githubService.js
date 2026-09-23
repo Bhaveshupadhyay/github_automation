@@ -17,6 +17,21 @@ export class GithubService {
    * @returns {Promise<boolean>}
    */
   async dispatchWorkflow(targetRepo, prompt, channelId, threadTs = null) {
+    return this.dispatchEvent("ai_developer_task", {
+      target_repo: targetRepo,
+      user_prompt: prompt,
+      slack_channel: channelId,
+      slack_thread_ts: threadTs
+    });
+  }
+
+  /**
+   * Sends a repository_dispatch event to github_automation.
+   * @param {string} eventType
+   * @param {Object} clientPayload
+   * @returns {Promise<boolean>}
+   */
+  async dispatchEvent(eventType, clientPayload) {
     if (!this.pat) {
       console.error("[GithubService] GITHUB_PAT token missing.");
       return false;
@@ -32,24 +47,16 @@ export class GithubService {
           "Accept": "application/vnd.github.v3+json",
           "User-Agent": "Cloudflare-Worker-Antigravity"
         },
-        body: JSON.stringify({
-          event_type: "ai_developer_task",
-          client_payload: {
-            target_repo: targetRepo,
-            user_prompt: prompt,
-            slack_channel: channelId,
-            slack_thread_ts: threadTs
-          }
-        })
+        body: JSON.stringify({ event_type: eventType, client_payload: clientPayload })
       });
 
       if (!res.ok) {
         const errText = await res.text();
-        console.error(`[GithubService] Workflow dispatch failed (${res.status}): ${errText}`);
+        console.error(`[GithubService] ${eventType} dispatch failed (${res.status}): ${errText}`);
         return false;
       }
 
-      console.log(`[GithubService] Successfully dispatched workflow for target repo: ${targetRepo}`);
+      console.log(`[GithubService] Dispatched ${eventType}: ${JSON.stringify(clientPayload)}`);
       return true;
     } catch (err) {
       console.error("[GithubService] Dispatch error:", err);

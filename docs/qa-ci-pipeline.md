@@ -1,126 +1,183 @@
-# QA CI Pipeline (Phase 6)
+# QA CI Pipeline
 
-The assembled pipeline. Phases 1–5 produced independent CLIs; this phase wires them into
-two reusable GitHub Actions workflows and adds the guardrails that make them safe to run
-on every pull request.
+The assembled pipeline. Phases 1–5 produced independent CLIs; Phase 6 wired them into two
+GitHub Actions workflows with the guardrails that make them safe to run. Both workflows
+run **centrally, in this repository**, for pull requests opened in other repositories, and
+**only when a user asks the Slack bot for QA testing**. Asking the bot to write code opens
+a pull request; it never tests one.
 
 ## Shape
 
-Both workflows are **reusable** (`on: workflow_call`) and live in this repository. A
-consumer repository copies a short caller from `contracts/templates/workflows/`:
+The repositories under test hold no workflow file and no secret. Everything — the
+pipeline, its secrets, its runs and its logs — lives here.
+
+```
+@bot target repo: owner/frontend  add an admin panel…   → the bot opens a frontend PR
+@bot run QA on this                                      (in that thread)
+  → Worker classifies the request as QA_TESTING and finds the frontend PR
+  → bot: "which backend should it run against?"
+      owner/backend#8 (or its link)   → the backend PR's branch, run in the runner
+      main  (or `main owner/repo`)    → that backend's main branch, run in the runner
+      dev                             → the deployed dev APIs; no backend is started
+  → repository_dispatch `qa_<platform>_preview` on github_automation
+  → resolve → qa-preview → publish, all in github_automation's Actions
+  → frontend PR branch cloned at its head commit, pointed at the chosen backend
+  → tests generated from the diff, run and recorded
+  → one comment on the pull request, media in R2, reply in the Slack thread
+```
+
+The frontend PR is the one named in the message, else the latest registered PR linked in
+the thread. A request that names a backend PR too (`@bot test owner/web#5 against
+owner/api#8`) starts at once. Answering "no backend PR" gets the `main` and `dev` options;
+an unrecognised answer gets the question again. The answer may be tagged or not, but a
+QA request itself only counts when the bot is tagged, and a QA reply never resumes the
+coding run.
 
 | File | Purpose |
 | :--- | :--- |
-| `.github/workflows/qa-web-preview.yml` | Frontend PRs: Playwright journeys against the paired backend |
+| `contracts/qa-targets.json` | Which repositories can be QA-tested, their platform, paired backend and settings |
+| `.github/workflows/qa-web-preview.yml` | Web PRs: Playwright journeys against the paired backend |
 | `.github/workflows/qa-mobile-preview.yml` | Mobile PRs: Maestro flows on an Android emulator |
-| `contracts/templates/workflows/*.caller.yml` | Copied into the app repository; declares when to run and which backend to pair |
+| `cloudflare-worker/src/services/qaRequestService.js` | Finds the PR a Slack QA request means and dispatches the pipeline |
+| `automation/qa_pr_context_cli.py` | `qa-pr-context`: reads the PR fresh from the API and pairs it with its target |
 
-They are deliberately not triggered by `pull_request` here. This repository has no
-application to preview, so a direct trigger would run the pipeline against the tooling.
+Each workflow also has a `workflow_dispatch` trigger, for re-running a pull request by hand
+after updating its backend branch or fixing a broken test (Phase 7.3):
 
-```yaml
-jobs:
-  qa:
-    uses: bhaveshupadhyay/github_automation/.github/workflows/qa-web-preview.yml@main
-    with:
-      backend-repo: your-org/your-backend
-    secrets:
-      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+```bash
+gh workflow run qa-web-preview.yml -f repository=owner/frontend -f pr_number=42 -f backend=owner/backend#8
 ```
 
-## Step sequence
+## Registering a repository
 
-1. Checkout the frontend **at the PR head commit**, with full history.
-2. Checkout this tooling repository and install the `qa-*` CLIs.
-3. Install SOPS and age.
-4. Key-drift check on the frontend.
-5. Resolve the backend branch (explicit declaration → matching remote head → default).
-6. Checkout the backend at the resolved branch.
-7. Key-drift check on the backend.
-8. Check that `.env.qa.enc` decrypts, failing fast on a bad key. Nothing is exported to the job.
-9. Start the database, backend and frontend; wait for both health probes.
-10. Generate the test plan from the diff, reusing the cached plan when the diff is unchanged.
-11. Execute the journeys, recording video.
-12. Compress the recording and build the preview GIF.
-13. Load the storage credentials (GitHub secrets over `.env.qa.enc`) inside the publish step only,
-    then publish the single in-place PR comment; upload artifacts if storage degraded.
-14. Stop the services and shred the decrypted environment.
-15. Re-assert the test verdict as the job's verdict.
+Add it to `contracts/qa-targets.json`:
 
-Steps 4 and 8 come before step 9 on purpose. Drift and decryption failures are cheap to
-diagnose at the point they occur; the same failures surfacing after startup look like
-unrelated failing assertions minutes later.
+```json
+{
+  "targets": {
+    "owner/frontend": {
+      "platform": "web",
+      "backend_repo": "owner/backend",
+      "backend_default_branch": "main",
+      "frontend_url": "http://localhost:5173"
+    }
+  }
+}
+```
+
+| Field | Default | Meaning |
+| :--- | :--- | :--- |
+| `platform` | — | `web` or `mobile`: which pipeline runs |
+| `backend_repo` | — | Backend paired with this repository |
+| `backend_default_branch` | `main` | Used when the PR declares no backend branch and no head matches |
+| `alternate_backend_repos` | `[]` | Other backends a requester may choose. Any other repository is refused, since a backend runs beside the QA secrets |
+| `dev_api_url` | none | Deployed dev API base URL for the `dev` answer. Unset, `dev` is refused with a reason |
+| `slack_channel` | none | Slack channel for a manual re-run's result. A Slack request replies in its own thread |
+| `db_strategy` | `auto` | `auto`, `cloud_dev` or `ephemeral_container` |
+| `startup_timeout_seconds` | `420` | Budget for install, migrations and health probes |
+| `frontend_url`, `node_version` | `http://localhost:3000`, `20` | Web only |
+| `api_base_url`, `android_api_level`, `java_version` | `http://10.0.2.2:8000`, `34`, `17` | Mobile only |
+
+Unknown fields are rejected, so a typo fails loudly instead of falling back to a default.
+Nothing is installed in the registered repository: no workflow, no secret, no webhook.
+
+The backend repository still needs its `.env.qa.enc` and `.sops.yaml`, and both
+repositories need a `qa-contract.json`: those describe the application, not the pipeline.
+
+## Jobs
+
+**`resolve`** reads the pull request from the API — the dispatch payload carries only a
+repository, a number and the backend choice — and refuses it when it is unregistered,
+closed, or from a fork. A backend PR gets the same open/fork check and is checked out at
+its head commit. With no choice (a manual re-run without `backend`), the backend branch is
+resolved from the PR (explicit declaration → matching remote head → default).
+
+**`qa-preview`** runs the pull request's code:
+
+1. Checkout the PR head commit with full history, and this repository's tooling.
+2. Install SOPS and age; key-drift check on the frontend.
+3. Checkout the backend at the chosen PR or branch; key-drift check on the backend.
+4. Check that `.env.qa.enc` decrypts, failing fast on a bad key. Nothing is exported.
+5. Start the database, backend and frontend, with the frontend's `apiBaseUrlEnvVar`
+   pointed at the backend; wait for both health probes. With `dev`, steps 3–4 are skipped
+   and only the frontend starts, pointed at `dev_api_url`.
+6. Generate the test plan from the diff, reusing the cached plan when unchanged.
+7. Execute the journeys, recording video; compress it and build the preview GIF.
+8. Hand the results to `publish` as an artifact; stop the services; re-assert the verdict.
+
+**`publish`** runs on a fresh runner, downloads the results, uploads the media to R2,
+edits the single PR comment in place and replies in the Slack thread that asked. It runs
+even when `qa-preview` failed, so a red run still publishes the recording of its failure,
+but not when the run was cancelled by a newer request. A run that stopped before any test
+ran, a skipped request, and a `resolve` that failed outright are also answered in the
+thread.
 
 ## Guardrails
 
-**Concurrency.** Both the caller and the called workflow declare
-`cancel-in-progress: true`, keyed on the pull request number. Both are needed: a caller
-that keeps running holds its called workflow alive. Web and mobile use distinct group
-names, so a repository running both does not have one cancel the other.
+**Secret isolation.** The pull request's code runs only in `qa-preview`. GitHub sends
+every secret a job references to that job's runner, where the PR's code has sudo, so
+`qa-preview` does not reference the PAT or the R2 credentials at all: they exist only in
+`resolve` and `publish`, which run none of the PR's code. `qa-preview` clones with a
+read-only token — `QA_READ_TOKEN` when set, else the run's own token, which can read
+public repositories — and every checkout sets `persist-credentials: false`. A backend
+the requester names must be `backend_repo` or listed in `alternate_backend_repos`.
 
-Cancellation is a capacity control, not a correctness guarantee — a run already past the
-cancellation point still finishes. The single-comment invariant is restored by the
-publisher itself (Directive 5.A.4), not by this setting.
+**Fork safety.** Fork code would run with this repository's secrets, so forks never run.
+`qa-pr-context` refuses them against the API, so neither a Slack request nor a manual
+dispatch can bypass the check.
 
-**Job timeouts.** 15 minutes for web, 25 for mobile, both overridable through the
-`timeout-minutes` input. Mobile is higher because emulator boot and the Gradle build
-dominate the run; Appendix A.5 records why mobile is an independent milestone.
+**Untrusted input.** Dispatch values reach scripts only through the environment and are
+validated before use. The PR body travels as a file, never interpolated into a script.
 
-**Fork safety.** A fork PR receives a read-only token and no secrets, so the preview job
-is skipped by `if: ${{ !github.event.pull_request.head.repo.fork }}` and a separate job
-writes an explanatory notice. That job attempts a PR comment and tolerates failure —
-a fork's token cannot post one — so the job summary is the reliable surface. Nothing
-about a fork PR turns the pipeline red.
+**Concurrency.** Keyed on repository and PR number, with `cancel-in-progress: true`, so a
+second request for the same PR cancels the run still testing it, and PR #7 in one repository never
+cancels PR #7 in another. Cancellation is a capacity control, not a correctness guarantee;
+the publisher restores the single-comment invariant itself (Directive 5.A.4).
 
-**Reporting survives failure.** The execution step carries `continue-on-error: true`, and
-media processing, publishing and teardown carry `if: always()`. The final step re-reads
-`steps.tests.outcome` and fails the job, so a red run still publishes the recording of its
-failure and still fails branch protection.
+**Job timeouts.** 5 minutes for `resolve`, 15 for web and 25 for mobile `qa-preview`
+(emulator boot and the Gradle build dominate; Appendix A.5), 10 for `publish`.
 
-**Commit identity.** Checkout pins `github.event.pull_request.head.sha` and publishing
-passes the same value. `GITHUB_SHA` is never used: on a `pull_request` event it is the
-synthetic merge commit of `refs/pull/N/merge`, which appears in no commit list and is
-recreated whenever the base branch moves (Directive 5.A.2).
-
-**Untrusted text.** The PR body reaches the branch resolver through a file, never
-interpolated into a script. Decrypted values are passed through `::add-mask::` before
-export, and the plaintext env file is written under `RUNNER_TEMP` — outside the workspace,
-where no upload or commit step can reach it — and removed during teardown.
+**Commit identity.** Checkout pins the head SHA that `resolve` read, and publishing
+reports the same value. This repository's own commit is never used (Directive 5.A.2).
 
 ## Caching
+
+Caches belong to this repository and are shared by every repository it serves, so the
+test-plan keys carry the repository name.
 
 | Cache | Key | Effect |
 | :--- | :--- | :--- |
 | uv / Python deps | `tooling/uv.lock` | Tooling install |
 | npm | `frontend/package-lock.json` | Frontend install |
 | Playwright browsers | `~/.cache/ms-playwright`, keyed on `uv.lock` | Skips a ~150MB Chromium download |
-| Test plans | PR number + head SHA, with prefix restore-keys | A re-run of an unchanged diff makes no model call |
+| Test plans | repository + PR number + head SHA, with prefix restore-keys | A re-run of an unchanged diff makes no model call |
 | Gradle | `gradle/actions/setup-gradle` | Mobile build |
-
-The plan cache's `restore-keys` matter: without them every push is a cold cache, and the
-plan is regenerated even when the diff content already has an entry.
 
 ## Secrets
 
-`SOPS_AGE_KEY` is the only required secret. The backend environment is decrypted from the
-`.env.qa.enc` committed beside the code. Cloudflare R2 credentials can live either there or
-in GitHub Actions secrets; when both are set, the GitHub secret wins. Either way they are loaded
-inside the publish step alone, never exported to the job, because earlier steps run the pull
-request's own code.
+All in **this repository's** Actions secrets.
 
-| Secret | Required | Absent behaviour |
-| :--- | :--- | :--- |
-| `SOPS_AGE_KEY` | Yes | Fails fast at the decryption step with an explicit message |
-| `GEMINI_API_KEY` | No | Test generation falls back to the baseline smoke suite |
-| `BACKEND_TOKEN` | No | Falls back to the workflow token; needed when the backend is private |
-| `SLACK_BOT_TOKEN` | No | Slack notification skipped entirely |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL` | No | Falls back to the `R2_*` keys in `.env.qa.enc`, then to workflow artifacts |
+| Secret | Required | Used by | Absent behaviour |
+| :--- | :--- | :--- | :--- |
+| `PAT_TOKEN` | Yes | `resolve`, `publish` | Cannot read the PR or comment on it. Needs read access to the repositories under test and write access to their pull requests |
+| `QA_READ_TOKEN` | Private repos only | `qa-preview` clones | Read-only (`contents: read`) token for cloning private repositories under test. Public ones clone with the run's own token |
+| `SOPS_AGE_KEY` | Yes | `qa-preview` | Fails fast at the decryption step |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL` | No | `publish` | Media falls back to workflow artifacts |
+| `GEMINI_API_KEY` | No | `resolve`, `qa-preview` | Test generation falls back to the baseline smoke suite |
+| `SLACK_BOT_TOKEN` | No | `publish` | Slack notification skipped |
+
+The Worker needs only what it already has: `GITHUB_PAT` (now also used to read the
+registry) and the Slack and Gemini credentials.
+
+Comments are posted as the PAT's account, which the publisher resolves through `/user` to
+recognise its own previous comment.
 
 ## Running the pieces locally
 
 Each stage is an ordinary CLI, so a failing run can be reproduced step by step:
 
 ```bash
+qa-pr-context --repository owner/frontend --pr 42 --platform web
 qa-branch-resolve --source-branch feat/x --backend-repo-url https://github.com/org/api.git --json
 qa-lifecycle --backend-dir ./backend --frontend-dir ./frontend --check-only
 qa-test-gen --base-branch origin/main --output plan.json
@@ -129,12 +186,7 @@ qa-media --input raw/video.webm --output-dir processed --result-json media.json
 qa-publish --repo org/app --pr 42 --test-result run.json --media-result media.json --dry-run
 ```
 
-`qa-run` is the bridge Phase 5 assumed: it validates the model-authored plan, executes it,
-writes the `TestRunResult` that `qa-publish` consumes, and names the one recording worth
-processing — the failing journey's when there is one, since that is what a reviewer opens
-on a red run.
-
-Its exit codes are distinguished because they call for different responses:
+`qa-run`'s exit codes are distinguished because they call for different responses:
 
 | Code | Meaning |
 | :--- | :--- |
@@ -143,40 +195,19 @@ Its exit codes are distinguished because they call for different responses:
 | `2` | Nothing executed: runner unavailable, empty plan, engine crash |
 | `3` | Usage error: missing or malformed plan, Maestro without an app ID |
 
-A result JSON is written on all of them, so the publishing stage can always explain the
-run rather than silently omitting a section.
-
 ## Verifying the guardrails
 
-`tests/test_qa_workflow_assembly.py` asserts these properties against the parsed YAML
-rather than leaving them to review: trigger shape, concurrency and cancellation, per-job
-timeouts, the fork condition, step ordering, head-SHA usage, masking, and the caches. Each
-test names the failure it excludes, so it can fail for the right reason.
+`tests/test_qa_workflow_assembly.py` asserts these properties against the parsed YAML:
+trigger shape, job structure, secret isolation, credential persistence, concurrency,
+timeouts, the fork check, step ordering, head-SHA usage, the Slack round trip and the
+caches. The Worker's QA routing is covered by `npm run test:worker`.
 
-For the YAML itself:
+## Piloting
 
-```bash
-actionlint -ignore 'property "job_workflow_sha" is not defined' \
-  .github/workflows/qa-web-preview.yml .github/workflows/qa-mobile-preview.yml
-```
-
-The ignore is a false positive: `github.job_workflow_sha` is documented by GitHub but
-missing from actionlint 1.7.7's context table. It is not relied upon blindly — the tooling
-install step verifies `qa-run` exists and fails with an actionable message if the checkout
-resolved to a commit that predates it.
-
-## Piloting before merge
-
-Component tests pass on both sides of a missing bridge, so the pipeline must run once end
-to end against a real pull request before these workflows are merged. Point a caller at
-the feature branch:
-
-```yaml
-uses: bhaveshupadhyay/github_automation/.github/workflows/qa-web-preview.yml@feat/qa-automation-phase-6
-```
-
-The tooling checkout follows that same commit automatically, so no second ref needs
-pinning. Run it on one real frontend PR carrying the `qa-preview` label — that single run
-exercises SOPS decryption, branch resolution, health probes, plan generation, Playwright,
-storage and the comment publisher together, and is itself the first of the Phase 7.1
-pilot runs.
+GitHub runs `repository_dispatch` and `workflow_dispatch` workflows from the **default
+branch**, so Slack-requested runs use whatever `main` holds. The first end-to-end run
+therefore happens after merge and a Worker deploy: tag the bot in a thread where it opened
+a pull request on a registered repository, ask it to run QA, and check the run in this
+repository's Actions tab. That run exercises intent routing, dispatch, SOPS decryption,
+branch resolution, health probes, plan generation, Playwright, storage, the comment
+publisher and the Slack reply together, and is the first of the Phase 7.1 pilot runs.

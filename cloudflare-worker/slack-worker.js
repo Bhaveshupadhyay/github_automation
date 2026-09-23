@@ -9,6 +9,8 @@ import { createLlmProvider } from "./src/providers/llmFactory.js";
 import { IntentService } from "./src/services/intentService.js";
 import { SlackService } from "./src/services/slackService.js";
 import { GithubService } from "./src/services/githubService.js";
+import { QaTargetRegistryService } from "./src/services/qaTargetRegistryService.js";
+import { QaRequestService } from "./src/services/qaRequestService.js";
 
 const OWNER_REPO_REGEX = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
@@ -51,6 +53,9 @@ async function verifySlackSignature(request, rawBody, signingSecret) {
   return hashHex === slackSignature;
 }
 
+// Shared across requests within an isolate, so the registry cache survives between messages.
+let qaTargetRegistryService = null;
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "GET") {
@@ -82,6 +87,12 @@ export default {
         env.WORKFLOW_REPO_OWNER,
         env.WORKFLOW_REPO_NAME
       );
+      qaTargetRegistryService ??= new QaTargetRegistryService(
+        env.GITHUB_PAT,
+        env.WORKFLOW_REPO_OWNER,
+        env.WORKFLOW_REPO_NAME
+      );
+      const qaRequestService = new QaRequestService(slackService, githubService, qaTargetRegistryService);
 
       // 1. Handle Slack Slash Commands (application/x-www-form-urlencoded)
       if (contentType.includes("application/x-www-form-urlencoded")) {
@@ -94,7 +105,7 @@ export default {
           return new Response("Usage: `/code [owner/repo] <your prompt>`", { status: 200 });
         }
 
-        ctx.waitUntil(handleCommandOrMention(text, channelId, userId, null, env, intentService, slackService, githubService));
+        ctx.waitUntil(handleCommandOrMention(text, channelId, userId, null, null, env, intentService, slackService, githubService, qaRequestService));
 
         return new Response("⚡ *Antigravity AI Agent Active!* Evaluating intent...", {
           headers: { "Content-Type": "text/plain" }
@@ -124,14 +135,14 @@ export default {
 
           // Case A: Thread Reply Clarification
           if (event.type === "message" && event.thread_ts && event.text) {
-            ctx.waitUntil(handleSlackThreadReply(event, env, slackService, githubService));
+            ctx.waitUntil(handleSlackThreadReply(event, env, intentService, slackService, githubService, qaRequestService));
             return new Response("OK", { status: 200 });
           }
 
           // Case B: Direct App Mention (@bot [owner/repo] prompt)
           if (event.type === "app_mention" && event.text) {
             const cleanText = event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
-            ctx.waitUntil(handleCommandOrMention(cleanText, event.channel, event.user, event.ts, env, intentService, slackService, githubService));
+            ctx.waitUntil(handleCommandOrMention(cleanText, event.channel, event.user, event.ts, event.thread_ts || null, env, intentService, slackService, githubService, qaRequestService));
             return new Response("OK", { status: 200 });
           }
         }
@@ -148,7 +159,7 @@ export default {
 /**
  * Handles incoming user commands or app mentions with Fast-Path Intent Routing.
  */
-async function handleCommandOrMention(text, channelId, userId, threadTs, env, intentService, slackService, githubService) {
+async function handleCommandOrMention(text, channelId, userId, threadTs, parentThreadTs, env, intentService, slackService, githubService, qaRequestService) {
   const parts = text.trim().split(/\s+/);
   let repo = env.DEFAULT_GITHUB_REPO || "";
   let prompt = text.trim();
@@ -164,8 +175,24 @@ async function handleCommandOrMention(text, channelId, userId, threadTs, env, in
     return;
   }
 
+  // A tagged answer to the bot's backend question is handled by the thread-reply path.
+  if (await qaRequestService.pendingQuestion(channelId, parentThreadTs, threadTs)) {
+    return;
+  }
+
   // Step 1: Fast-Path Intent Evaluation (< 500ms API call)
   const { intent, question } = await intentService.evaluateIntent(repo, prompt);
+
+  // QA testing runs only when asked for, and tests an existing pull request's branch.
+  if (intent === IntentType.QA_TESTING) {
+    await qaRequestService.handle({
+      text,
+      channelId,
+      threadTs: parentThreadTs,
+      replyTs: parentThreadTs || threadTs
+    });
+    return;
+  }
 
   let currentThreadTs = threadTs;
 
@@ -206,10 +233,16 @@ async function handleCommandOrMention(text, channelId, userId, threadTs, env, in
 /**
  * Handles Thread Replies when user replies with requested clarification.
  */
-async function handleSlackThreadReply(event, env, slackService, githubService) {
+async function handleSlackThreadReply(event, env, intentService, slackService, githubService, qaRequestService) {
   const channelId = event.channel;
   const threadTs = event.thread_ts;
   const userReply = event.text;
+
+  // An answer to "which backend should QA run against?", tagged or not. Handled here
+  // only, since Slack also delivers a tagged reply as an app_mention.
+  if (await qaRequestService.handleBackendAnswer({ text: userReply, channelId, threadTs, messageTs: event.ts })) {
+    return;
+  }
 
   // Retrieve parent thread message context from Slack
   const { parentRepo, parentPrompt } = await slackService.fetchThreadParent(channelId, threadTs);
@@ -220,6 +253,13 @@ async function handleSlackThreadReply(event, env, slackService, githubService) {
   }
 
   const targetRepo = parentRepo || env.DEFAULT_GITHUB_REPO || "";
+
+  // A QA request is not a coding clarification. QA starts only when the bot is tagged,
+  // which the app_mention path handles; resuming the coding run here would change code.
+  const { intent } = await intentService.evaluateIntent(targetRepo, userReply);
+  if (intent === IntentType.QA_TESTING) {
+    return;
+  }
   const combinedPrompt = `Original Request: "${parentPrompt}". User Clarification: "${userReply}"`;
 
   // Inform thread that execution is resuming
@@ -239,3 +279,4 @@ async function handleSlackThreadReply(event, env, slackService, githubService) {
     );
   }
 }
+

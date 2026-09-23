@@ -13,22 +13,25 @@ class ILifecycleSupervisor(ABC):
     @abstractmethod
     def start_services(
         self,
-        backend_dir: Path,
+        backend_dir: Optional[Path],
         frontend_dir: Optional[Path] = None,
         db_strategy: Optional[IDatabaseStrategy] = None,
         sops_age_key: Optional[str] = None,
         backend_health_timeout: float = 60.0,
         frontend_health_timeout: float = 60.0,
+        api_base_url_override: Optional[str] = None,
     ) -> LifecycleResult:
         """Starts backend and optional frontend services, verifying health readiness.
 
         Args:
-            backend_dir: Path to the backend repository root containing qa-contract.json.
+            backend_dir: Path to the backend repository root containing qa-contract.json, or
+                None to start only the frontend against `api_base_url_override`.
             frontend_dir: Optional path to the frontend repository root.
             db_strategy: Database provisioning strategy to utilize.
             sops_age_key: Private age key for SOPS decryption (defaults to SOPS_AGE_KEY env).
             backend_health_timeout: Maximum seconds to await backend readiness.
             frontend_health_timeout: Maximum seconds to await frontend readiness.
+            api_base_url_override: API address given to the frontend instead of the local backend.
 
         Returns:
             LifecycleResult detailing process IDs, listening ports, and status.

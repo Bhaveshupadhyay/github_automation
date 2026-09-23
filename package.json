@@ -20,7 +20,8 @@
   "scripts": {
     "start": "node bin/cli.js",
     "deploy:worker": "wrangler deploy --config cloudflare-worker/wrangler.toml",
-    "dev:worker": "wrangler dev --config cloudflare-worker/wrangler.toml"
+    "dev:worker": "wrangler dev --config cloudflare-worker/wrangler.toml",
+    "test:worker": "node --test cloudflare-worker/test/*.test.js"
   },
   "keywords": [
     "autopr",

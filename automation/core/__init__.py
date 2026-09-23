@@ -31,6 +31,7 @@ from automation.core.dependency import (
     get_storage_provider,
     get_pr_comment_publisher,
     get_qa_report_formatter,
+    get_pr_context_service,
 )
 
 __all__ = [
@@ -66,5 +67,6 @@ __all__ = [
     "get_storage_provider",
     "get_pr_comment_publisher",
     "get_qa_report_formatter",
+    "get_pr_context_service",
 ]
 

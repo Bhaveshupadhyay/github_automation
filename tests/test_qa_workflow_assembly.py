@@ -1,9 +1,14 @@
 """Structural tests for the assembled QA workflows.
 
-The guardrails in Phase 6 — concurrency, job timeouts, fork safety, ordering, and the
-`if: always()` reporting path — are properties of the YAML, so they are asserted against
-the parsed YAML rather than reviewed by eye. Each test names the failure it excludes.
+The guardrails — concurrency, job timeouts, fork safety, secret isolation, ordering, and
+the `if: always()` reporting path — are properties of the YAML, so they are asserted
+against the parsed YAML rather than reviewed by eye. Each test names the failure it
+excludes.
+
+The pipeline runs centrally in this repository: a dispatch names a pull request in a
+registered repository, and three jobs resolve it, run its code, and publish the result.
 """
+import json
 import re
 import unittest
 from pathlib import Path
@@ -12,10 +17,9 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
-TEMPLATE_DIR = REPO_ROOT / "contracts" / "templates" / "workflows"
+REGISTRY_PATH = REPO_ROOT / "contracts" / "qa-targets.json"
 
-REUSABLE_WORKFLOWS = ["qa-web-preview.yml", "qa-mobile-preview.yml"]
-CALLER_TEMPLATES = ["qa-web-preview.caller.yml", "qa-mobile-preview.caller.yml"]
+QA_WORKFLOWS = {"qa-web-preview.yml": "web", "qa-mobile-preview.yml": "mobile"}
 R2_SECRETS = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_PUBLIC_BASE_URL"]
 
 
@@ -28,8 +32,8 @@ def _triggers(document: dict) -> dict:
     return document.get("on", document.get(True, {}))
 
 
-def _preview_job(document: dict) -> dict:
-    return document["jobs"]["qa-preview"]
+def _job(document: dict, name: str) -> dict:
+    return document["jobs"][name]
 
 
 def _step_index(job: dict, fragment: str) -> int:
@@ -40,109 +44,245 @@ def _step_index(job: dict, fragment: str) -> int:
     raise AssertionError(f"No step named like {fragment!r}. Steps: {[s.get('name') for s in job['steps']]}")
 
 
+def _step(job: dict, fragment: str) -> dict:
+    return job["steps"][_step_index(job, fragment)]
+
+
+def _workflows():
+    for name, platform in QA_WORKFLOWS.items():
+        yield name, platform, _load(WORKFLOW_DIR / name)
+
+
 class TestWorkflowsParse(unittest.TestCase):
     """Every workflow file must be valid YAML with the expected top-level shape."""
 
     def test_all_workflows_parse(self) -> None:
-        for name in REUSABLE_WORKFLOWS + [p.name for p in WORKFLOW_DIR.glob("*.yml")]:
-            with self.subTest(workflow=name):
-                document = _load(WORKFLOW_DIR / name)
+        for path in WORKFLOW_DIR.glob("*.yml"):
+            with self.subTest(workflow=path.name):
+                document = _load(path)
                 self.assertIn("jobs", document)
                 self.assertTrue(_triggers(document), "Workflow declares no trigger.")
 
-    def test_caller_templates_parse(self) -> None:
-        for name in CALLER_TEMPLATES:
-            with self.subTest(template=name):
-                document = _load(TEMPLATE_DIR / name)
-                self.assertIn("jobs", document)
 
+class TestCentralTriggers(unittest.TestCase):
+    """The pipeline runs here, for pull requests opened elsewhere."""
 
-class TestReusableContract(unittest.TestCase):
-    """The QA workflows are called by consumer repositories, never self-triggered."""
-
-    def test_only_workflow_call_is_declared(self) -> None:
-        """A `pull_request` trigger here would run the pipeline against this tooling
-        repository, which has no application to preview."""
-        for name in REUSABLE_WORKFLOWS:
+    def test_triggered_only_by_dispatch(self) -> None:
+        """`workflow_call` would run the pipeline inside the caller's repository, with
+        its secrets; `pull_request` would run it against this repository, which has no
+        application to preview."""
+        for name, platform, document in _workflows():
             with self.subTest(workflow=name):
-                triggers = _triggers(_load(WORKFLOW_DIR / name))
-                self.assertEqual(list(triggers.keys()), ["workflow_call"])
+                triggers = _triggers(document)
+                self.assertEqual(sorted(triggers.keys()), ["repository_dispatch", "workflow_dispatch"])
+                self.assertEqual(triggers["repository_dispatch"]["types"], [f"qa_{platform}_preview"])
 
-    def test_sops_age_key_is_the_only_required_secret(self) -> None:
-        """Directive: a caller needs exactly one secret to run the pipeline."""
-        for name in REUSABLE_WORKFLOWS:
+    def test_manual_rerun_names_the_pull_request(self) -> None:
+        for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                secrets = _triggers(_load(WORKFLOW_DIR / name))["workflow_call"]["secrets"]
-                required = [key for key, spec in secrets.items() if spec.get("required")]
-                self.assertEqual(required, ["SOPS_AGE_KEY"])
+                inputs = _triggers(document)["workflow_dispatch"]["inputs"]
+                self.assertTrue(inputs["repository"]["required"])
+                self.assertTrue(inputs["pr_number"]["required"])
 
-    def test_storage_credentials_are_accepted_as_optional_secrets(self) -> None:
-        """R2 credentials may come from GitHub secrets instead of .env.qa.enc."""
-        for name in REUSABLE_WORKFLOWS:
+    def test_every_registered_platform_has_a_dispatch_target(self) -> None:
+        """The Worker dispatches `qa_<platform>_preview`; a platform with no workflow
+        listening would drop its pull requests silently."""
+        registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+        listened = {
+            _triggers(document)["repository_dispatch"]["types"][0] for _, _, document in _workflows()
+        }
+        for repository, target in registry["targets"].items():
+            with self.subTest(repository=repository):
+                self.assertIn(f"qa_{target['platform']}_preview", listened)
+
+    def test_dispatch_values_reach_scripts_only_through_the_environment(self) -> None:
+        """Interpolated into `run:`, a crafted repository name would execute."""
+        for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                secrets = _triggers(_load(WORKFLOW_DIR / name))["workflow_call"]["secrets"]
-                for key in R2_SECRETS:
-                    self.assertIn(key, secrets)
-                    self.assertFalse(secrets[key].get("required"))
+                for job_name, job in document["jobs"].items():
+                    for step in job["steps"]:
+                        run = str(step.get("run", ""))
+                        self.assertNotIn("client_payload", run, f"{job_name}: {step.get('name')}")
+                        self.assertNotRegex(run, r"\$\{\{\s*inputs\.", f"{job_name}: {step.get('name')}")
+                resolve = _step(_job(document, "resolve"), "Resolve the pull request")
+                self.assertIn("=~", resolve["run"], "Dispatch values must be validated before use.")
+
+
+class TestJobStructure(unittest.TestCase):
+    """resolve → qa-preview → publish, with the skip decision made once."""
+
+    def test_the_preview_runs_only_for_a_resolved_pull_request(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                job = _job(document, "qa-preview")
+                self.assertEqual(job["needs"], "resolve")
+                self.assertIn("needs.resolve.outputs.skip == 'false'", job["if"])
+
+    def test_publishing_runs_after_a_failed_preview_but_not_a_cancelled_one(self) -> None:
+        """The recording of a failure is the most valuable thing a red run produces. A run
+        cancelled by a newer request must stay silent: its "stopped early" notice would
+        contradict the run that superseded it, and `always()` would still post it."""
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                job = _job(document, "publish")
+                self.assertEqual(sorted(job["needs"]), ["qa-preview", "resolve"])
+                self.assertIn("!cancelled()", job["if"])
+                self.assertNotIn("always()", job["if"])
+                self.assertIn("needs.resolve.outputs.skip == 'false'", job["if"])
+
+    def test_a_failed_resolve_is_answered(self) -> None:
+        """A failure before the skip decision leaves both later jobs skipped."""
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                notice = _step(_job(document, "resolve"), "could not start")
+                self.assertEqual(notice["if"], "failure()")
+                self.assertIn("chat.postMessage", notice["run"])
+
+    def test_a_skipped_pull_request_is_explained(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                explain = _step(_job(document, "resolve"), "Explain why no preview")
+                self.assertIn("skip == 'true'", explain["if"])
+                self.assertIn("GITHUB_STEP_SUMMARY", explain["run"])
+
+    def test_results_are_handed_from_the_preview_to_the_publisher(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                handoff = _step(_job(document, "qa-preview"), "Hand the results")
+                self.assertIn("always()", handoff["if"])
+                collect = _step(_job(document, "publish"), "Collect the test results")
+                self.assertEqual(handoff["with"]["name"], collect["with"]["name"])
+
+
+class TestSlackRoundTrip(unittest.TestCase):
+    """QA is requested in a Slack thread, so every outcome is answered in that thread."""
+
+    def test_results_reply_in_the_requesting_thread(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                env = _step(_job(document, "publish"), "Publish the QA comment")["env"]
+                self.assertIn("client_payload.slack_thread_ts", env["SLACK_THREAD"])
+                # The request's channel wins; the registry's is the fallback for manual re-runs.
+                self.assertTrue(env["SLACK_CHANNEL"].startswith("${{ github.event.client_payload.slack_channel ||"))
+
+    def test_a_run_that_never_reached_the_tests_still_reports(self) -> None:
+        """Without it, a startup failure leaves the requester waiting in silence."""
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                publish = _job(document, "publish")
+                early = _step(publish, "stopped early")
+                self.assertIn("hashFiles('qa-results/run.json') == ''", early["if"])
+                self.assertLess(_step_index(publish, "stopped early"), _step_index(publish, "Publish the QA comment"))
+
+    def test_a_skipped_request_is_answered(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                explain = _step(_job(document, "resolve"), "Explain why no preview")
+                self.assertIn("chat.postMessage", explain["run"])
+
+
+class TestBackendChoice(unittest.TestCase):
+    """The requester chooses the backend: a backend PR, a repository's main, or the dev APIs."""
+
+    def test_the_choice_is_validated_and_passed_to_the_resolver(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                self.assertIn("client_payload.backend", document["env"]["BACKEND_CHOICE"])
+                self.assertIn("backend", _triggers(document)["workflow_dispatch"]["inputs"])
+                run = _step(_job(document, "resolve"), "Resolve the pull request")["run"]
+                self.assertIn('--backend "$BACKEND_CHOICE"', run)
+                self.assertIn('[[ "$BACKEND_CHOICE" =~', run)
+
+    def test_the_branch_resolver_runs_only_when_nothing_was_chosen(self) -> None:
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                resolver = _step(_job(document, "resolve"), "Resolve the backend branch")
+                self.assertIn("backend_mode == 'auto'", resolver["if"])
+                # A chosen PR or branch wins over the resolver's branch.
+                self.assertIn("steps.pr.outputs.backend_ref ||", _job(document, "resolve")["outputs"]["backend_branch"])
+
+    def test_dev_mode_never_clones_or_decrypts_a_backend(self) -> None:
+        for name, _, document in _workflows():
+            job = _job(document, "qa-preview")
+            for fragment in ("Checkout backend", "Check backend secret drift", "Decrypt the QA environment"):
+                with self.subTest(workflow=name, step=fragment):
+                    self.assertIn("backend_mode != 'dev'", _step(job, fragment)["if"])
+
+    def test_web_dev_mode_starts_only_the_frontend_against_the_dev_apis(self) -> None:
+        job = _job(_load(WORKFLOW_DIR / "qa-web-preview.yml"), "qa-preview")
+        start = _step(job, "await health")
+        self.assertIn("--no-backend --api-base-url \"$DEV_API_URL\"", start["run"])
+
+
+class TestSecretIsolation(unittest.TestCase):
+    """The pull request's code must never share a runner with credentials that can
+    write to it: a malicious step could read them from a later step's process."""
 
     def test_storage_credentials_reach_only_the_publish_step(self) -> None:
-        """Written to GITHUB_ENV, credentials reach every later step, including the pull
-        request's own test plan and build hooks. Only the publisher needs them."""
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+        for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                publish = _step_index(job, "Publish the QA comment")
-                for index, step in enumerate(job["steps"]):
-                    run = str(step.get("run", ""))
-                    self.assertFalse("R2_" in run and "GITHUB_ENV" in run, step.get("name"))
-                    if index != publish:
-                        self.assertNotIn("secrets.R2_", str(step.get("env", "")), step.get("name"))
-                step_env = job["steps"][publish]["env"]
+                for job_name, job in document["jobs"].items():
+                    for step in job["steps"]:
+                        run = str(step.get("run", ""))
+                        self.assertFalse("R2_" in run and "GITHUB_ENV" in run, step.get("name"))
+                        if not (job_name == "publish" and step.get("name") == "Publish the QA comment"):
+                            self.assertNotIn("secrets.R2_", str(step.get("env", "")), step.get("name"))
+                publish = _step(_job(document, "publish"), "Publish the QA comment")
                 for key in R2_SECRETS:
-                    self.assertEqual(step_env[key], f"${{{{ secrets.{key} }}}}")
+                    self.assertEqual(publish["env"][key], f"${{{{ secrets.{key} }}}}")
+
+    def test_the_preview_job_never_references_the_write_token(self) -> None:
+        """GitHub sends every secret a job references to its runner, where the PR's code
+        has sudo and can read the runner's memory. Not persisting a checkout credential
+        is not enough; the preview job must not reference the PAT at all."""
+        for name, _, document in _workflows():
+            with self.subTest(workflow=name):
+                job = _job(document, "qa-preview")
+                self.assertNotIn("PAT_TOKEN", str(job))
+                for step in job["steps"]:
+                    if "actions/checkout" in str(step.get("uses", "")) and "token" in step.get("with", {}):
+                        self.assertEqual(step["with"]["token"], "${{ secrets.QA_READ_TOKEN || github.token }}")
+
+    def test_no_checkout_leaves_a_token_on_disk(self) -> None:
+        """actions/checkout writes its token into .git/config unless told not to, where
+        the pull request's own code could read it."""
+        for name, _, document in _workflows():
+            for job_name, job in document["jobs"].items():
+                for step in job["steps"]:
+                    if "actions/checkout" not in str(step.get("uses", "")):
+                        continue
+                    with self.subTest(workflow=name, job=job_name, step=step.get("name")):
+                        self.assertIs(step["with"]["persist-credentials"], False)
 
     def test_decryption_exports_nothing_to_the_job(self) -> None:
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+        for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                decrypt = job["steps"][_step_index(job, "Decrypt the QA environment")]
+                decrypt = _step(_job(document, "qa-preview"), "Decrypt the QA environment")
                 self.assertNotIn("GITHUB_ENV", decrypt["run"])
 
-    def test_the_tooling_checkout_defaults_to_this_workflows_own_commit(self) -> None:
-        """A caller pinned to a branch must get that branch's CLIs. Defaulting to `main`
-        would run new steps against whatever `main` holds — during a branch pilot, CLIs
-        that do not yet exist."""
-        for name in REUSABLE_WORKFLOWS:
-            document = _load(WORKFLOW_DIR / name)
+    def test_the_run_token_cannot_write(self) -> None:
+        """This run's own token is scoped to github_automation; commenting on the
+        repository under test uses the PAT in the publish job only."""
+        for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                self.assertEqual(
-                    _triggers(document)["workflow_call"]["inputs"]["tooling-ref"]["default"], ""
-                )
-                job = _preview_job(document)
-                checkout = job["steps"][_step_index(job, "Checkout QA tooling")]
-                self.assertIn("github.job_workflow_sha", checkout["with"]["ref"])
-
-    def test_backend_repository_is_an_input_not_a_constant(self) -> None:
-        """A hardcoded repository would couple the pipeline to one product."""
-        for name in REUSABLE_WORKFLOWS:
-            with self.subTest(workflow=name):
-                inputs = _triggers(_load(WORKFLOW_DIR / name))["workflow_call"]["inputs"]
-                self.assertTrue(inputs["backend-repo"]["required"])
+                self.assertEqual(document["permissions"], {"contents": "read"})
 
 
 class TestConcurrencyGuardrails(unittest.TestCase):
     """A second push must cancel the run still testing the previous commit."""
 
     def test_concurrency_is_keyed_on_the_pull_request_and_cancels(self) -> None:
-        for name in REUSABLE_WORKFLOWS + CALLER_TEMPLATES:
-            directory = WORKFLOW_DIR if name in REUSABLE_WORKFLOWS else TEMPLATE_DIR
+        for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                concurrency = _load(directory / name)["concurrency"]
+                concurrency = document["concurrency"]
                 self.assertTrue(concurrency["cancel-in-progress"])
-                self.assertIn("pull_request.number", concurrency["group"])
+                # Keyed on repository and number: this repository serves many, and PR #7
+                # in one must not cancel PR #7 in another.
+                self.assertIn("client_payload.repository", concurrency["group"])
+                self.assertIn("client_payload.pr_number", concurrency["group"])
+                self.assertIn("inputs.pr_number", concurrency["group"])
 
-    def test_caller_and_called_groups_do_not_collide_across_pipelines(self) -> None:
-        """Web and mobile runs on one pull request must not cancel each other."""
+    def test_web_and_mobile_groups_do_not_collide(self) -> None:
         web = _load(WORKFLOW_DIR / "qa-web-preview.yml")["concurrency"]["group"]
         mobile = _load(WORKFLOW_DIR / "qa-mobile-preview.yml")["concurrency"]["group"]
         self.assertNotEqual(web, mobile)
@@ -153,72 +293,50 @@ class TestDefensiveGuardrails(unittest.TestCase):
 
     def test_every_job_declares_a_timeout(self) -> None:
         """Without one a hung service holds a runner for six hours."""
-        for name in REUSABLE_WORKFLOWS:
-            document = _load(WORKFLOW_DIR / name)
+        for name, _, document in _workflows():
             for job_name, job in document["jobs"].items():
                 with self.subTest(workflow=name, job=job_name):
                     self.assertIn("timeout-minutes", job)
 
-    def test_media_publish_and_teardown_run_after_a_failed_test_step(self) -> None:
-        """The recording of a failure is the most valuable artifact a red run produces,
-        so it must survive the step that failed."""
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
-            for fragment in ("Compress the recording", "Publish the QA comment", "Stop the", "Report the test outcome"):
+    def test_media_and_teardown_run_after_a_failed_test_step(self) -> None:
+        for name, _, document in _workflows():
+            job = _job(document, "qa-preview")
+            for fragment in ("Compress the recording", "Hand the results", "Stop the", "Report the test outcome"):
                 with self.subTest(workflow=name, step=fragment):
-                    step = job["steps"][_step_index(job, fragment)]
-                    self.assertIn("always()", str(step.get("if", "")))
+                    self.assertIn("always()", str(_step(job, fragment).get("if", "")))
 
     def test_the_test_step_does_not_abort_the_job(self) -> None:
-        """`continue-on-error` is what lets the publishing steps run; the job's verdict
-        is then re-asserted by the final step."""
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+        """`continue-on-error` lets the media steps run; the job's verdict is then
+        re-asserted by the final step."""
+        for name, _, document in _workflows():
+            job = _job(document, "qa-preview")
             with self.subTest(workflow=name):
-                test_step = job["steps"][_step_index(job, "Execute the")]
-                self.assertTrue(test_step.get("continue-on-error"))
-                report = job["steps"][_step_index(job, "Report the test outcome")]
+                self.assertTrue(_step(job, "Execute the").get("continue-on-error"))
+                report = _step(job, "Report the test outcome")
                 self.assertIn("steps.tests.outcome", report["run"])
-
-    def test_a_failed_run_still_fails_the_job(self) -> None:
-        """Publishing a red comment from a green job would hide the failure from
-        branch protection."""
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
-            with self.subTest(workflow=name):
-                report = job["steps"][_step_index(job, "Report the test outcome")]
+                # Publishing a red comment from a green run would hide the failure.
                 self.assertIn("exit 1", report["run"])
 
 
 class TestForkSafety(unittest.TestCase):
-    """A fork PR gets no secrets, so it must be skipped visibly, not failed cryptically."""
+    """Fork code must never run with this repository's secrets."""
 
-    def test_the_preview_job_is_skipped_for_forks(self) -> None:
-        for name in REUSABLE_WORKFLOWS:
+    def test_the_pull_request_is_resolved_through_the_fork_check(self) -> None:
+        """qa-pr-context refuses forks and closed PRs even on a manual dispatch; the
+        workflow must go through it rather than trusting the payload."""
+        for name, platform, document in _workflows():
             with self.subTest(workflow=name):
-                condition = _preview_job(_load(WORKFLOW_DIR / name))["if"]
-                self.assertIn("head.repo.fork", condition)
-                self.assertIn("!", condition)
-
-    def test_a_fork_receives_an_explanatory_notice(self) -> None:
-        for name in REUSABLE_WORKFLOWS:
-            with self.subTest(workflow=name):
-                notice = _load(WORKFLOW_DIR / name)["jobs"]["fork-notice"]
-                self.assertIn("head.repo.fork", notice["if"])
-                body = notice["steps"][0]["run"]
-                self.assertIn("GITHUB_STEP_SUMMARY", body)
-                # The comment attempt must not fail the job: a fork's token is read-only.
-                self.assertIn("||", body)
+                run = _step(_job(document, "resolve"), "Resolve the pull request")["run"]
+                self.assertIn("qa-pr-context", run)
+                self.assertIn(f"--platform {platform}", run)
 
 
 class TestStepOrdering(unittest.TestCase):
-    """The plan's sequence exists so failures surface at their cheapest point."""
+    """The sequence exists so failures surface at their cheapest point."""
 
     def test_drift_detection_precedes_decryption_and_startup(self) -> None:
-        """Key drift must halt the run before services start, or the symptom appears
-        minutes later as an unrelated failing assertion."""
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+        for name, _, document in _workflows():
+            job = _job(document, "qa-preview")
             with self.subTest(workflow=name):
                 drift = _step_index(job, "backend secret drift")
                 decrypt = _step_index(job, "Decrypt the QA environment")
@@ -229,54 +347,46 @@ class TestStepOrdering(unittest.TestCase):
                 self.assertLess(startup, tests)
 
     def test_the_backend_branch_is_resolved_before_it_is_checked_out(self) -> None:
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+        for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                self.assertLess(
-                    _step_index(job, "Resolve the backend branch"),
-                    _step_index(job, "Checkout backend"),
-                )
+                resolve = _job(document, "resolve")
+                self.assertIn("backend_branch", resolve["outputs"])
+                _step_index(resolve, "Resolve the backend branch")
+                checkout = _step(_job(document, "qa-preview"), "Checkout backend")
+                self.assertEqual(checkout["with"]["ref"], "${{ needs.resolve.outputs.backend_branch }}")
 
     def test_the_plan_is_generated_before_the_tests_execute(self) -> None:
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+        for name, _, document in _workflows():
+            job = _job(document, "qa-preview")
             with self.subTest(workflow=name):
-                self.assertLess(
-                    _step_index(job, "Generate the test plan"),
-                    _step_index(job, "Execute the"),
-                )
+                self.assertLess(_step_index(job, "Generate the test plan"), _step_index(job, "Execute the"))
 
 
 class TestCommitIdentity(unittest.TestCase):
-    """Directive 5.A.2: GITHUB_SHA is the synthetic merge commit on pull_request events."""
+    """Directive 5.A.2: results are reported against the PR head, never this repository's commit."""
 
-    def test_publishing_uses_the_pull_request_head_sha(self) -> None:
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+    def test_publishing_uses_the_resolved_head_sha(self) -> None:
+        for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                publish = job["steps"][_step_index(job, "Publish the QA comment")]
-                self.assertEqual(
-                    publish["env"]["HEAD_SHA"], "${{ github.event.pull_request.head.sha }}"
-                )
+                publish = _step(_job(document, "publish"), "Publish the QA comment")
+                self.assertEqual(publish["env"]["HEAD_SHA"], "${{ needs.resolve.outputs.head_sha }}")
+                self.assertEqual(publish["env"]["TARGET_REPO"], "${{ needs.resolve.outputs.repository }}")
 
-    def test_no_step_substitutes_the_merge_commit(self) -> None:
-        for name in REUSABLE_WORKFLOWS:
+    def test_no_step_substitutes_this_repositorys_commit(self) -> None:
+        for name in QA_WORKFLOWS:
             text = (WORKFLOW_DIR / name).read_text(encoding="utf-8")
             with self.subTest(workflow=name):
                 self.assertNotIn("${{ github.sha }}", text)
-                # GITHUB_SHA may be named in prose explaining why it is not used, but
-                # never expanded in a command.
                 self.assertNotIn("$GITHUB_SHA", text)
 
-    def test_checkout_pins_the_head_commit_not_the_merge_ref(self) -> None:
-        """Checking out the default ref would test `refs/pull/N/merge`, a commit the
-        author never wrote."""
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+    def test_checkout_pins_the_head_commit(self) -> None:
+        for name, _, document in _workflows():
+            job = _job(document, "qa-preview")
             with self.subTest(workflow=name):
                 checkout = job["steps"][0]
                 self.assertIn("actions/checkout", checkout["uses"])
-                self.assertEqual(checkout["with"]["ref"], "${{ github.event.pull_request.head.sha }}")
+                self.assertEqual(checkout["with"]["repository"], "${{ needs.resolve.outputs.repository }}")
+                self.assertEqual(checkout["with"]["ref"], "${{ needs.resolve.outputs.head_sha }}")
                 # The diff against the base branch needs full history.
                 self.assertEqual(checkout["with"]["fetch-depth"], 0)
 
@@ -284,53 +394,35 @@ class TestCommitIdentity(unittest.TestCase):
 class TestUntrustedTextHandling(unittest.TestCase):
     """Appendix B.3: human- and model-authored text reaches a shell in these workflows."""
 
-    def test_the_pull_request_body_never_reaches_a_script_inline(self) -> None:
+    def test_the_pull_request_body_travels_as_a_file(self) -> None:
         """Interpolated into `run:`, a PR body containing backticks or $( ) executes."""
-        pattern = re.compile(r"\$\{\{\s*github\.event\.pull_request\.(body|title)\s*\}\}")
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+        pattern = re.compile(r"pull_request\.(body|title)")
+        for name, _, document in _workflows():
+            text = (WORKFLOW_DIR / name).read_text(encoding="utf-8")
             with self.subTest(workflow=name):
-                for step in job["steps"]:
-                    self.assertIsNone(
-                        pattern.search(str(step.get("run", ""))),
-                        f"Step {step.get('name')!r} interpolates PR text into its script.",
-                    )
-                resolve = job["steps"][_step_index(job, "Resolve the backend branch")]
-                self.assertEqual(resolve["env"]["PR_BODY"], "${{ github.event.pull_request.body }}")
-                # Passed as a file, so the resolver reads it rather than the shell re-parsing it.
-                self.assertIn("--pr-body-file", resolve["run"])
+                self.assertIsNone(pattern.search(text))
+                resolve = _job(document, "resolve")
+                self.assertIn("--body-file", _step(resolve, "Resolve the pull request")["run"])
+                self.assertIn("--pr-body-file", _step(resolve, "Resolve the backend branch")["run"])
 
     def test_the_media_step_reads_the_runners_selection_and_never_globs(self) -> None:
         """Globbing the recording directory returns whichever file the filesystem lists
         first, which on a multi-journey run publishes a passing journey's video while the
         comment reports a failure."""
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+        for name, _, document in _workflows():
+            job = _job(document, "qa-preview")
             with self.subTest(workflow=name):
-                tests = job["steps"][_step_index(job, "Execute the")]
+                tests = _step(job, "Execute the")
                 invocation = str(tests.get("run", "")) + str(tests.get("with", {}).get("script", ""))
                 self.assertIn("--selected-video-out", invocation)
-                media = job["steps"][_step_index(job, "Compress the recording")]
+                media = _step(job, "Compress the recording")
                 self.assertIn("selected-video.txt", media["run"])
                 self.assertNotIn("find ", media["run"])
 
-    def test_publish_step_masks_and_removes_decrypted_values(self) -> None:
-        """An unmasked value appears in plain text in the run log, and a decrypted file
-        in the workspace could be uploaded with the artifacts."""
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
-            with self.subTest(workflow=name):
-                publish = job["steps"][_step_index(job, "Publish the QA comment")]["run"]
-                self.assertIn("::add-mask::", publish)
-                self.assertIn('mktemp "$RUNNER_TEMP/', publish)
-                self.assertIn('rm -f "$QA_ENV"', publish)
-                self.assertNotIn("GITHUB_ENV", publish)
-
     def test_the_decrypted_file_is_removed_on_every_exit_path(self) -> None:
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+        for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                teardown = job["steps"][_step_index(job, "Stop the")]
+                teardown = _step(_job(document, "qa-preview"), "Stop the")
                 self.assertIn("rm -f", teardown["run"])
                 self.assertIn("always()", str(teardown["if"]))
 
@@ -339,44 +431,25 @@ class TestCaching(unittest.TestCase):
     """Warm runs must not re-download what a previous run already resolved."""
 
     def test_web_pipeline_caches_dependencies_browsers_and_plans(self) -> None:
-        job = _preview_job(_load(WORKFLOW_DIR / "qa-web-preview.yml"))
-        cached = [
+        job = _job(_load(WORKFLOW_DIR / "qa-web-preview.yml"), "qa-preview")
+        joined = " ".join(
             str(step.get("with", {}).get("path", "")) + str(step.get("with", {}).get("cache", ""))
             for step in job["steps"]
-        ]
-        joined = " ".join(cached)
+        )
         self.assertIn("ms-playwright", joined)
         self.assertIn("test-plans", joined)
         self.assertIn("npm", joined)
 
-    def test_the_plan_cache_falls_back_to_an_earlier_run_on_the_same_pr(self) -> None:
-        """Without restore-keys every push is a cold cache and a fresh model call."""
-        for name in REUSABLE_WORKFLOWS:
-            job = _preview_job(_load(WORKFLOW_DIR / name))
+    def test_the_plan_cache_is_scoped_to_the_repository(self) -> None:
+        """This cache is shared by every repository served. Unscoped, PR #7 in one
+        repository would restore the plan of PR #7 in another."""
+        for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                cache = job["steps"][_step_index(job, "Restore the test plan cache")]
+                cache = _step(_job(document, "qa-preview"), "Restore the test plan cache")
+                self.assertIn("needs.resolve.outputs.repository", cache["with"]["key"])
                 self.assertIn("restore-keys", cache["with"])
-
-
-class TestCallerTemplates(unittest.TestCase):
-    """The templates a consumer repository copies must call the workflows shipped here."""
-
-    def test_each_template_calls_its_reusable_workflow(self) -> None:
-        for template, workflow in zip(CALLER_TEMPLATES, REUSABLE_WORKFLOWS):
-            with self.subTest(template=template):
-                job = _load(TEMPLATE_DIR / template)["jobs"]["qa"]
-                self.assertIn(f".github/workflows/{workflow}@", job["uses"])
-                self.assertIn("SOPS_AGE_KEY", job["secrets"])
-                for key in R2_SECRETS:
-                    self.assertIn(key, job["secrets"])
-                self.assertIn("backend-repo", job["with"])
-
-    def test_templates_trigger_on_the_pull_request_events_that_change_code(self) -> None:
-        for template in CALLER_TEMPLATES:
-            with self.subTest(template=template):
-                types = _triggers(_load(TEMPLATE_DIR / template))["pull_request"]["types"]
-                self.assertIn("synchronize", types)
-                self.assertIn("opened", types)
+                for line in cache["with"]["restore-keys"].strip().splitlines():
+                    self.assertIn("needs.resolve.outputs.repository", line)
 
 
 if __name__ == "__main__":

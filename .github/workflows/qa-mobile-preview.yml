@@ -1,132 +1,225 @@
 name: QA Mobile Preview
 
-# Reusable pipeline for mobile pull requests: boots the paired backend inside the runner,
-# builds the debug binary against it, and records Maestro journeys on an emulator.
+# Central pipeline for mobile pull requests opened in other repositories. It runs only
+# when someone tags the Slack bot and asks for QA: the Cloudflare Worker sends a
+# `qa_mobile_preview` repository dispatch here; this run boots the paired backend, builds
+# the pull request's debug binary against it, records Maestro journeys on an emulator,
+# and reports on the pull request and in the Slack thread that asked.
 #
 # The backend is reached at 10.0.2.2 rather than localhost, because inside an Android
-# emulator localhost is the emulator itself. The address is supplied to the build under
-# the variable name the repository's own contract declares.
+# emulator localhost is the emulator itself.
 #
 # Mobile runs are slower and flakier than web runs on hosted runners (Appendix A.5). Ship
 # the web pipeline first and treat this as an independent milestone.
+#
+# Which repositories are served, and which backend each pairs with, lives in
+# contracts/qa-targets.json.
+#
+# Three jobs, so the pull request's own code never shares a runner with the credentials
+# that can write to it: `resolve` reads the PR, `qa-preview` runs its code, and `publish`
+# holds the token and storage keys on a fresh runner.
 
 on:
-  workflow_call:
+  repository_dispatch:
+    types: [qa_mobile_preview]
+  # Manual re-run, e.g. after updating the backend branch or fixing a broken test.
+  workflow_dispatch:
     inputs:
-      backend-repo:
-        description: "Backend repository as owner/name, paired with the mobile PR."
+      repository:
+        description: "Mobile repository as owner/name, registered in contracts/qa-targets.json."
         type: string
         required: true
-      backend-default-branch:
-        description: "Branch used when the PR declares no backend branch and no head matches."
+      pr_number:
+        description: "Pull request number."
         type: string
-        required: false
-        default: "dev"
-      tooling-ref:
-        description: >-
-          Ref of bhaveshupadhyay/github_automation supplying the qa-* CLIs. Defaults to the
-          commit of this workflow file, so the CLIs always match the steps calling them.
+        required: true
+      backend:
+        description: "Backend: empty (resolve automatically), dev, main, main:owner/name, or owner/name#N."
         type: string
         required: false
         default: ""
-      db-strategy:
-        description: "auto, cloud_dev or ephemeral_container."
-        type: string
-        required: false
-        default: "auto"
-      api-base-url:
-        description: "Address the app uses for the backend. 10.0.2.2 is the host as seen from an Android emulator."
-        type: string
-        required: false
-        default: "http://10.0.2.2:8000"
-      android-api-level:
-        description: "Emulator API level."
-        type: number
-        required: false
-        default: 34
-      java-version:
-        description: "JDK used by the Gradle build."
-        type: string
-        required: false
-        default: "17"
-      startup-timeout-seconds:
-        description: "Budget for backend dependency install, migrations and the health probe."
-        type: number
-        required: false
-        default: 420
-      timeout-minutes:
-        description: "Hard job timeout. Emulator boot and the Gradle build dominate it."
-        type: number
-        required: false
-        default: 25
-    secrets:
-      SOPS_AGE_KEY:
-        description: "Decrypts .env.qa.enc, the backend environment for the run."
-        required: true
-      GEMINI_API_KEY:
-        description: "Diff analysis. Absent, test generation falls back to the baseline flows."
-        required: false
-      BACKEND_TOKEN:
-        description: "Read access to the backend repository when it is private."
-        required: false
-      SLACK_BOT_TOKEN:
-        description: "Slack thread reply. Skipped entirely when unset."
-        required: false
-      R2_ACCOUNT_ID:
-        description: "Cloudflare account for R2. Overrides the value in .env.qa.enc."
-        required: false
-      R2_ACCESS_KEY_ID:
-        description: "R2 access key. Overrides the value in .env.qa.enc."
-        required: false
-      R2_SECRET_ACCESS_KEY:
-        description: "R2 secret key. Overrides the value in .env.qa.enc."
-        required: false
-      R2_BUCKET:
-        description: "R2 bucket for QA media. Overrides the value in .env.qa.enc."
-        required: false
-      R2_PUBLIC_BASE_URL:
-        description: "Public origin of the R2 bucket. Overrides the value in .env.qa.enc."
-        required: false
 
+# Keyed on the pull request, so a new push cancels the run still testing the old commit.
+# `cancel-in-progress` is a capacity control, not a correctness guarantee: a run already
+# past the cancellation point still finishes, which is why the publisher restores the
+# single-comment invariant on its own (Directive 5.A.4).
 concurrency:
-  group: qa-mobile-preview-${{ github.event.pull_request.number || github.ref }}
+  group: qa-mobile-preview-${{ github.event.client_payload.repository || inputs.repository }}-${{ github.event.client_payload.pr_number || inputs.pr_number }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  pull-requests: write
+
+env:
+  PR_REPOSITORY: ${{ github.event.client_payload.repository || inputs.repository }}
+  PR_NUMBER: ${{ github.event.client_payload.pr_number || inputs.pr_number }}
+  # The Slack thread the request came from, so results are posted back into it. Empty on
+  # a manual re-run.
+  REQUEST_SLACK_CHANNEL: ${{ github.event.client_payload.slack_channel }}
+  REQUEST_SLACK_THREAD: ${{ github.event.client_payload.slack_thread_ts }}
+  # What the requester chose to test against: a backend PR, `main`, or the dev APIs.
+  BACKEND_CHOICE: ${{ github.event.client_payload.backend || inputs.backend }}
 
 jobs:
-  fork-notice:
-    if: github.event.pull_request.head.repo.fork
+  # Reads the pull request fresh from the API and pairs it with its registered backend.
+  # A PR that must not run — unregistered, closed, or from a fork — ends the run here.
+  resolve:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      skip: ${{ steps.pr.outputs.skip }}
+      repository: ${{ steps.pr.outputs.repository }}
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      base_ref: ${{ steps.pr.outputs.base_ref }}
+      backend_repo: ${{ steps.pr.outputs.backend_repo }}
+      backend_mode: ${{ steps.pr.outputs.backend_mode }}
+      # A chosen backend PR or branch, else the branch resolved from the PR.
+      backend_branch: ${{ steps.pr.outputs.backend_ref || steps.backend_branch.outputs.branch }}
+      backend_label: ${{ steps.pr.outputs.backend_label }}
+      dev_api_url: ${{ steps.pr.outputs.dev_api_url }}
+      slack_channel: ${{ steps.pr.outputs.slack_channel }}
+      db_strategy: ${{ steps.pr.outputs.db_strategy }}
+      startup_timeout_seconds: ${{ steps.pr.outputs.startup_timeout_seconds }}
+      python_version: ${{ steps.pr.outputs.python_version }}
+      api_base_url: ${{ steps.pr.outputs.api_base_url }}
+      android_api_level: ${{ steps.pr.outputs.android_api_level }}
+      java_version: ${{ steps.pr.outputs.java_version }}
     steps:
-      - name: Explain why no preview was produced
+      - name: Checkout QA tooling
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Resolve the pull request
+        id: pr
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          NOTICE=$(cat <<'EOF'
-          <!-- qa-preview-bot -->
-          ### ⏭️ QA preview skipped — pull request from a fork
+          set -euo pipefail
+          # Both values arrive from a dispatch payload or a manual input. They are read
+          # from the environment, never interpolated, and validated before any use.
+          REPO='[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
+          if ! [[ "$PR_REPOSITORY" =~ ^${REPO}$ ]] || ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid dispatch: repository must be owner/name and pr_number a number."
+            exit 1
+          fi
+          if ! [[ "$BACKEND_CHOICE" =~ ^(|dev|main|main:${REPO}|${REPO}#[0-9]+)$ ]]; then
+            echo "::error::Invalid dispatch: backend must be empty, dev, main, main:owner/name or owner/name#N."
+            exit 1
+          fi
+          mkdir -p qa-results
+          uv run qa-pr-context \
+            --repository "$PR_REPOSITORY" \
+            --pr "$PR_NUMBER" \
+            --platform mobile \
+            --backend "$BACKEND_CHOICE" \
+            --branch-result-out qa-results/branch.json \
+            --body-file qa-results/pr-body.txt
 
-          Secrets are not available to workflows triggered by a fork, so the QA environment
-          cannot be decrypted or started. Nothing is wrong with this pull request.
-
-          A maintainer can produce a preview by re-running this pull request from a branch
-          in this repository.
+      - name: Explain why no preview was produced
+        if: steps.pr.outputs.skip == 'true'
+        env:
+          REASON: ${{ steps.pr.outputs.skip_reason }}
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          echo "::notice::QA preview skipped: $REASON"
+          echo "QA preview skipped: $REASON" >> "$GITHUB_STEP_SUMMARY"
+          export SLACK_CHANNEL="$REQUEST_SLACK_CHANNEL" SLACK_THREAD="$REQUEST_SLACK_THREAD"
+          export MESSAGE="⏭️ *QA testing skipped:* $REASON"
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          token, channel = os.getenv("SLACK_TOKEN"), os.getenv("SLACK_CHANNEL")
+          if token and channel:
+              payload = {"channel": channel, "text": os.environ["MESSAGE"]}
+              if os.getenv("SLACK_THREAD"):
+                  payload["thread_ts"] = os.environ["SLACK_THREAD"]
+              req = urllib.request.Request(
+                  "https://slack.com/api/chat.postMessage",
+                  data=json.dumps(payload).encode(),
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+              )
+              try:
+                  urllib.request.urlopen(req, timeout=10).read()
+              except Exception as e:
+                  print(f"::warning::Slack notice not sent: {e}")
           EOF
-          )
-          echo "$NOTICE" >> "$GITHUB_STEP_SUMMARY"
-          printf '%s' "$NOTICE" | gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file - \
-            || echo "::notice::Could not post the notice; a fork token cannot comment. See the job summary."
 
+      # Which backend branch belongs to this PR: explicit declaration, then a matching
+      # remote head, then the registered default branch.
+      - name: Resolve the backend branch
+        id: backend_branch
+        if: steps.pr.outputs.skip == 'false' && steps.pr.outputs.backend_mode == 'auto'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SOURCE_BRANCH: ${{ steps.pr.outputs.head_ref }}
+          BACKEND_REPO: ${{ steps.pr.outputs.backend_repo }}
+          DEFAULT_BRANCH: ${{ steps.pr.outputs.backend_default_branch }}
+        run: |
+          set -euo pipefail
+          uv run qa-branch-resolve \
+            --source-branch "$SOURCE_BRANCH" \
+            --backend-repo-url "https://github.com/${BACKEND_REPO}.git" \
+            --pr-body-file qa-results/pr-body.txt \
+            --default-branch "$DEFAULT_BRANCH" \
+            --json > qa-results/branch.json
+          BRANCH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_branch"])' qa-results/branch.json)
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "Resolved backend branch: $BRANCH"
+
+      - name: Keep the branch resolution for the report
+        if: steps.pr.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-context-${{ github.run_id }}
+          path: qa-results/branch.json
+          retention-days: 1
+          if-no-files-found: ignore
+
+      # An invalid dispatch, an API error or an expired token fails this job before the
+      # skip decision exists, so neither later job runs. The requester still hears.
+      - name: Tell the requester the run could not start
+        if: failure()
+        env:
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          export SLACK_CHANNEL="$REQUEST_SLACK_CHANNEL" SLACK_THREAD="$REQUEST_SLACK_THREAD"
+          export MESSAGE="❌ *QA testing for ${PR_REPOSITORY}#${PR_NUMBER} could not start.* Logs: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          token, channel = os.getenv("SLACK_TOKEN"), os.getenv("SLACK_CHANNEL")
+          if token and channel:
+              payload = {"channel": channel, "text": os.environ["MESSAGE"]}
+              if os.getenv("SLACK_THREAD"):
+                  payload["thread_ts"] = os.environ["SLACK_THREAD"]
+              req = urllib.request.Request(
+                  "https://slack.com/api/chat.postMessage",
+                  data=json.dumps(payload).encode(),
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+              )
+              try:
+                  urllib.request.urlopen(req, timeout=10).read()
+              except Exception as e:
+                  print(f"::warning::Slack notice not sent: {e}")
+          EOF
+
+  # Runs the pull request's code. GitHub hands every secret a job references to its
+  # runner, where that code has sudo, so this job references no token that can write to
+  # the pull request and no storage credential: those belong to `publish`, on a separate
+  # runner. Clones use a read-only token — QA_READ_TOKEN for private repositories, else
+  # this run's own token, which can read public ones.
   qa-preview:
-    if: ${{ !github.event.pull_request.head.repo.fork }}
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    timeout-minutes: 25
     env:
       MOBILE_DIR: ${{ github.workspace }}/mobile
       BACKEND_DIR: ${{ github.workspace }}/backend
@@ -134,22 +227,22 @@ jobs:
       RESULTS_DIR: ${{ github.workspace }}/qa-results
       MEDIA_DIR: ${{ github.workspace }}/qa-media
     steps:
+      # Credentials are not persisted, so no token is left in .git/config for the PR's
+      # code to read.
       - name: Checkout mobile app at the pull request head
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ needs.resolve.outputs.repository }}
+          ref: ${{ needs.resolve.outputs.head_sha }}
+          token: ${{ secrets.QA_READ_TOKEN || github.token }}
           fetch-depth: 0
+          persist-credentials: false
           path: mobile
 
       - name: Checkout QA tooling
         uses: actions/checkout@v4
         with:
-          repository: bhaveshupadhyay/github_automation
-          # `job_workflow_sha` is the commit of this reusable workflow file. Defaulting to
-          # it means a caller pinned to a branch gets that branch's CLIs, instead of this
-          # file's steps running against whatever `main` happens to hold.
-          ref: ${{ inputs.tooling-ref || github.job_workflow_sha }}
+          persist-credentials: false
           path: tooling
 
       - name: Set up Python and uv
@@ -164,19 +257,12 @@ jobs:
           set -euo pipefail
           uv sync --project "$TOOLING_DIR" --extra qa
           echo "Tooling at $(git -C "$TOOLING_DIR" rev-parse --short HEAD)"
-          # Guards against a caller pinned to a branch resolving its CLIs from a different
-          # commit than this file. The symptom would otherwise be an unexplained "command
-          # not found" in the middle of the run.
-          if ! uv run --project "$TOOLING_DIR" qa-run --help > /dev/null 2>&1; then
-            echo "::error::The checked-out QA tooling has no qa-run command. Set the tooling-ref input to the ref supplying these workflows."
-            exit 1
-          fi
 
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: ${{ inputs.java-version }}
+          java-version: ${{ needs.resolve.outputs.java_version }}
 
       - name: Set up Gradle with its cache
         uses: gradle/actions/setup-gradle@v4
@@ -220,39 +306,18 @@ jobs:
             echo "::notice::No .env.example in the mobile repository; drift check skipped."
           fi
 
-      - name: Resolve the backend branch
-        id: backend_branch
-        working-directory: mobile
-        env:
-          GH_TOKEN: ${{ secrets.BACKEND_TOKEN || github.token }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
-          BACKEND_REPO: ${{ inputs.backend-repo }}
-          DEFAULT_BRANCH: ${{ inputs.backend-default-branch }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$RESULTS_DIR"
-          printf '%s' "$PR_BODY" > "$RESULTS_DIR/pr-body.txt"
-          uv run --project "$TOOLING_DIR" qa-branch-resolve \
-            --source-branch "$SOURCE_BRANCH" \
-            --backend-repo-url "https://github.com/${BACKEND_REPO}.git" \
-            --pr-body-file "$RESULTS_DIR/pr-body.txt" \
-            --default-branch "$DEFAULT_BRANCH" \
-            --json > "$RESULTS_DIR/branch.json"
-          BRANCH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_branch"])' "$RESULTS_DIR/branch.json")
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          echo "Resolved backend branch: $BRANCH"
-
       - name: Checkout backend at the resolved branch
+        if: needs.resolve.outputs.backend_mode != 'dev'
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.backend-repo }}
-          ref: ${{ steps.backend_branch.outputs.branch }}
-          token: ${{ secrets.BACKEND_TOKEN || github.token }}
+          repository: ${{ needs.resolve.outputs.backend_repo }}
+          ref: ${{ needs.resolve.outputs.backend_branch }}
+          token: ${{ secrets.QA_READ_TOKEN || github.token }}
+          persist-credentials: false
           path: backend
 
       - name: Check backend secret drift
+        if: needs.resolve.outputs.backend_mode != 'dev'
         working-directory: backend
         run: |
           if [ -f .env.example ]; then
@@ -261,20 +326,20 @@ jobs:
             echo "::notice::No .env.example in the backend repository; drift check skipped."
           fi
 
-      # 4. Fail fast on a missing key or an undecryptable file, before minutes of
-      #    startup. Nothing is exported: the supervisor decrypts for the services and
-      #    the publish step decrypts for storage, each keeping the values to itself.
+      # Fail fast on a missing key or an undecryptable file, before minutes of
+      #    startup. Nothing is exported: the supervisor decrypts for the services itself.
       - name: Decrypt the QA environment
+        if: needs.resolve.outputs.backend_mode != 'dev'
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
           set -euo pipefail
           if [ -z "${SOPS_AGE_KEY:-}" ]; then
-            echo "::error::SOPS_AGE_KEY is not set. It is the one secret this pipeline requires."
+            echo "::error::SOPS_AGE_KEY is not set in github_automation's secrets."
             exit 1
           fi
           if [ ! -f backend/.env.qa.enc ]; then
-            echo "::notice::No backend/.env.qa.enc; storage credentials can only come from GitHub secrets."
+            echo "::notice::No backend/.env.qa.enc; the backend starts without a decrypted environment."
             exit 0
           fi
           # The type is stated rather than inferred: SOPS cannot derive dotenv from the
@@ -285,11 +350,12 @@ jobs:
       # Only the backend runs under the supervisor here; the app under test is a binary
       # installed on the emulator rather than a served process.
       - name: Start the backend and await health
+        if: needs.resolve.outputs.backend_mode != 'dev'
         id: lifecycle
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-          DB_STRATEGY: ${{ inputs.db-strategy }}
-          STARTUP_TIMEOUT: ${{ inputs.startup-timeout-seconds }}
+          DB_STRATEGY: ${{ needs.resolve.outputs.db_strategy }}
+          STARTUP_TIMEOUT: ${{ needs.resolve.outputs.startup_timeout_seconds }}
         run: |
           set -euo pipefail
           mkdir -p "$RESULTS_DIR"
@@ -324,7 +390,7 @@ jobs:
       - name: Build the debug binary against the runner backend
         working-directory: mobile
         env:
-          API_BASE_URL: ${{ inputs.api-base-url }}
+          API_BASE_URL: ${{ needs.resolve.outputs.backend_mode == 'dev' && needs.resolve.outputs.dev_api_url || needs.resolve.outputs.api_base_url }}
           API_ENV_VAR: ${{ steps.contract.outputs.api_env_var }}
         run: |
           set -euo pipefail
@@ -347,20 +413,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: mobile/.qa-cache/test-plans
-          key: qa-mobile-plan-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          key: qa-mobile-plan-${{ needs.resolve.outputs.repository }}-${{ needs.resolve.outputs.pr_number }}-${{ needs.resolve.outputs.head_sha }}
           restore-keys: |
-            qa-mobile-plan-${{ github.event.pull_request.number }}-
-            qa-mobile-plan-
+            qa-mobile-plan-${{ needs.resolve.outputs.repository }}-${{ needs.resolve.outputs.pr_number }}-
+            qa-mobile-plan-${{ needs.resolve.outputs.repository }}-
 
       - name: Generate the test plan from the diff
         working-directory: mobile
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ needs.resolve.outputs.base_ref }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          if ! git rev-parse --verify --quiet "refs/remotes/origin/${BASE_REF}" > /dev/null; then
+            git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          fi
           uv run --project "$TOOLING_DIR" qa-test-gen \
             --commit-sha "$HEAD_SHA" \
             --base-branch "origin/$BASE_REF" \
@@ -388,8 +456,9 @@ jobs:
         env:
           BUNDLE_ID: ${{ steps.contract.outputs.bundle_id }}
           BUILD_PATH: ${{ steps.contract.outputs.build_path }}
+          API_BASE_URL: ${{ needs.resolve.outputs.backend_mode == 'dev' && needs.resolve.outputs.dev_api_url || needs.resolve.outputs.api_base_url }}
         with:
-          api-level: ${{ inputs.android-api-level }}
+          api-level: ${{ needs.resolve.outputs.android_api_level }}
           arch: x86_64
           profile: pixel_6
           force-avd-creation: false
@@ -402,7 +471,7 @@ jobs:
               --plan "$RESULTS_DIR/plan.json" \
               --runner maestro \
               --app-id "$BUNDLE_ID" \
-              --base-url "${{ inputs.api-base-url }}" \
+              --base-url "$API_BASE_URL" \
               --video-dir "$MEDIA_DIR/raw" \
               --result-json "$RESULTS_DIR/run.json" \
               --selected-video-out "$RESULTS_DIR/selected-video.txt"
@@ -432,71 +501,18 @@ jobs:
             --output-dir "$MEDIA_DIR/processed" \
             --result-json "$RESULTS_DIR/media.json"
 
-      - name: Publish the QA comment
+      # Hands the results to `publish`. Paths inside the result files are absolute, and
+      # every job of this repository shares the same workspace path, so they resolve
+      # unchanged on the publishing runner.
+      - name: Hand the results to the publisher
         if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          QA_ARTIFACT_DIR: ${{ github.workspace }}/qa-artifacts
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
-        run: |
-          set -euo pipefail
-          if [ ! -f "$RESULTS_DIR/run.json" ]; then
-            echo "::warning::No test result was written; nothing to publish."
-            exit 0
-          fi
-          # Storage credentials are loaded here and nowhere else. Exported to the job they
-          # would reach every later step, including the pull request's own code. An unset
-          # GitHub secret arrives as an empty string, so it is unset before the decrypted
-          # file is read, and a set one wins over the same key from .env.qa.enc.
-          for key in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_PUBLIC_BASE_URL; do
-            [ -n "${!key:-}" ] || unset "$key"
-          done
-          if [ -n "${SOPS_AGE_KEY:-}" ] && [ -f backend/.env.qa.enc ]; then
-            QA_ENV=$(mktemp "$RUNNER_TEMP/qa-publish.XXXXXX")
-            trap 'rm -f "$QA_ENV"' EXIT
-            if sops --decrypt --input-type dotenv --output-type dotenv \
-                backend/.env.qa.enc > "$QA_ENV"; then
-              while IFS='=' read -r key value; do
-                case "$key" in
-                  R2_*|AWS_*|SLACK_CHANNEL|SLACK_THREAD|QA_BOT_LOGIN) ;;
-                  *) continue ;;
-                esac
-                [ -z "${!key:-}" ] || continue
-                value="${value%\"}"; value="${value#\"}"
-                [ -n "$value" ] || continue
-                echo "::add-mask::$value"
-                export "$key=$value"
-              done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$QA_ENV" || true)
-            else
-              echo "::warning::Could not decrypt backend/.env.qa.enc; publishing without its storage credentials."
-            fi
-            rm -f "$QA_ENV"
-          fi
-          unset SOPS_AGE_KEY
-          uv run --project "$TOOLING_DIR" qa-publish \
-            --repo "$GITHUB_REPOSITORY" \
-            --pr "$PR_NUMBER" \
-            --sha "$HEAD_SHA" \
-            --test-result "$RESULTS_DIR/run.json" \
-            --media-result "$RESULTS_DIR/media.json" \
-            --branch-result "$RESULTS_DIR/branch.json" \
-            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-
-      - name: Upload QA media (storage fallback)
-        if: always() && hashFiles('qa-artifacts/**') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: qa-media-${{ github.event.pull_request.head.sha }}
-          path: qa-artifacts
-          retention-days: 30
+          name: qa-output-${{ github.run_id }}
+          path: |
+            qa-results
+            qa-media
+          retention-days: 1
           if-no-files-found: ignore
 
       - name: Upload diagnostics
@@ -528,3 +544,126 @@ jobs:
             exit 1
           fi
           echo "✅ All QA flows passed."
+
+  # Uploads the media and comments on the pull request. Runs none of the pull request's
+  # code, so the write token and the storage credentials never share its runner.
+  publish:
+    needs: [resolve, qa-preview]
+    # Runs after a failed preview, but not after a cancelled one: a newer request
+    # superseded it, and its "stopped early" notice would contradict the live run.
+    if: ${{ !cancelled() && needs.resolve.outputs.skip == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TOOLING_DIR: ${{ github.workspace }}/tooling
+      RESULTS_DIR: ${{ github.workspace }}/qa-results
+    steps:
+      - name: Checkout QA tooling
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: tooling
+
+      - name: Set up Python and uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "tooling/uv.lock"
+
+      - name: Install QA tooling
+        run: uv sync --project "$TOOLING_DIR" --extra qa
+
+      - name: Collect the test results
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: qa-output-${{ github.run_id }}
+          path: ${{ github.workspace }}
+
+      - name: Collect the branch resolution
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: qa-context-${{ github.run_id }}
+          path: qa-results
+
+      # The run stopped before any test executed — checkout, startup or plan generation.
+      # The requester still hears about it in the thread that asked.
+      - name: Tell the requester the run stopped early
+        if: hashFiles('qa-results/run.json') == ''
+        env:
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.slack_channel || needs.resolve.outputs.slack_channel }}
+          SLACK_THREAD: ${{ github.event.client_payload.slack_thread_ts }}
+          TARGET_REPO: ${{ needs.resolve.outputs.repository }}
+          TARGET_PR: ${{ needs.resolve.outputs.pr_number }}
+        run: |
+          export MESSAGE="❌ *QA testing for ${TARGET_REPO}#${TARGET_PR} stopped before any test ran.* Logs: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          token, channel = os.getenv("SLACK_TOKEN"), os.getenv("SLACK_CHANNEL")
+          if token and channel:
+              payload = {"channel": channel, "text": os.environ["MESSAGE"]}
+              if os.getenv("SLACK_THREAD"):
+                  payload["thread_ts"] = os.environ["SLACK_THREAD"]
+              req = urllib.request.Request(
+                  "https://slack.com/api/chat.postMessage",
+                  data=json.dumps(payload).encode(),
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+              )
+              try:
+                  urllib.request.urlopen(req, timeout=10).read()
+              except Exception as e:
+                  print(f"::warning::Slack notice not sent: {e}")
+          EOF
+
+      - name: Publish the QA comment
+        id: qa_publish
+        env:
+          # A token that can comment on the repository under test. This run's own
+          # GITHUB_TOKEN is scoped to github_automation and cannot.
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.slack_channel || needs.resolve.outputs.slack_channel }}
+          SLACK_THREAD: ${{ github.event.client_payload.slack_thread_ts }}
+          QA_ARTIFACT_DIR: ${{ github.workspace }}/qa-artifacts
+          TARGET_REPO: ${{ needs.resolve.outputs.repository }}
+          TARGET_PR: ${{ needs.resolve.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+        run: |
+          set -euo pipefail
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ ! -f "$RESULTS_DIR/run.json" ]; then
+            echo "::warning::No test result was written; nothing to publish."
+            exit 0
+          fi
+          # An unset secret or output arrives as an empty string, which the storage and
+          # Slack configuration would read as a value rather than as absent.
+          for key in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_PUBLIC_BASE_URL SLACK_CHANNEL SLACK_THREAD; do
+            [ -n "${!key:-}" ] || unset "$key"
+          done
+          uv run --project "$TOOLING_DIR" qa-publish \
+            --repo "$TARGET_REPO" \
+            --pr "$TARGET_PR" \
+            --sha "$HEAD_SHA" \
+            --test-result "$RESULTS_DIR/run.json" \
+            --media-result "$RESULTS_DIR/media.json" \
+            --branch-result "$RESULTS_DIR/branch.json" \
+            --run-url "$RUN_URL"
+
+      # Collects whatever the publisher staged when R2 was unavailable. Python cannot
+      # upload a workflow artifact itself, so this step completes that fallback.
+      - name: Upload QA media (storage fallback)
+        if: always() && hashFiles('qa-artifacts/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-media-${{ needs.resolve.outputs.head_sha }}
+          path: qa-artifacts
+          retention-days: 30
+          if-no-files-found: ignore

@@ -74,6 +74,9 @@ from automation.services.github_artifact_storage_provider import GitHubArtifactS
 from automation.services.fallback_storage_provider import FallbackStorageProvider
 from automation.services.github_pr_comment_publisher import GitHubPRCommentPublisher
 from automation.services.qa_report_formatter import QAReportFormatter
+from automation.services.github_pr_context_service import GitHubPullRequestContextService
+from automation.domain.qa_target import QATargetRegistry
+from automation.interfaces.pr_context_interface import IPullRequestContextService
 
 
 @lru_cache(maxsize=1)
@@ -313,3 +316,11 @@ def get_pr_comment_publisher(
 def get_qa_report_formatter() -> QAReportFormatter:
     """Returns the QA report markdown formatter."""
     return QAReportFormatter()
+
+
+def get_pr_context_service(
+    registry: QATargetRegistry,
+    token: Optional[str] = None,
+) -> IPullRequestContextService:
+    """Returns the service resolving a dispatched pull request against the target registry."""
+    return GitHubPullRequestContextService(registry=registry, token=token)

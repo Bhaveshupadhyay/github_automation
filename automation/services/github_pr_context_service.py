@@ -1,0 +1,157 @@
+"""Resolves a dispatched pull request against the QA target registry via the GitHub API."""
+import json
+import logging
+import os
+import re
+import urllib.error
+import urllib.request
+from typing import Any, Optional
+
+from automation.domain.qa_target import (
+    BackendChoice,
+    BackendMode,
+    PullRequestContext,
+    PullRequestSkipped,
+    QAPlatform,
+    QATarget,
+    QATargetRegistry,
+)
+from automation.interfaces.pr_context_interface import IPullRequestContextService
+
+logger = logging.getLogger("automation.pr_context")
+
+GITHUB_API_BASE = "https://api.github.com"
+REQUEST_TIMEOUT_SECONDS = 15
+
+REPO = r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
+BACKEND_PR_SPEC = re.compile(rf"^({REPO})#(\d+)$")
+BACKEND_MAIN_SPEC = re.compile(rf"^main(?::({REPO}))?$")
+
+
+class GitHubPullRequestContextService(IPullRequestContextService):
+    """Fetches the pull request fresh rather than trusting the dispatch payload.
+
+    The dispatch carries only a repository and a number. Everything else — the head
+    commit, the branches, the description — is read from the API at run time, so a
+    manual re-run and a Slack-requested run resolve identically, and the PR branch is
+    tested at its latest commit.
+    """
+
+    def __init__(
+        self,
+        registry: QATargetRegistry,
+        token: Optional[str] = None,
+        api_base: str = GITHUB_API_BASE,
+    ):
+        self._registry = registry
+        self._token = token or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN") or ""
+        self._api_base = api_base.rstrip("/")
+
+    def _get(self, url: str) -> Any:
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "qa-preview-bot",
+        }
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace")[:300]
+            raise RuntimeError(f"GitHub API GET {url} failed ({e.code}): {detail}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"GitHub API GET {url} unreachable: {e.reason}") from e
+
+    def resolve(self, repository: str, pr_number: int, platform: QAPlatform) -> PullRequestContext:
+        target = self._registry.find(repository)
+        if target is None:
+            raise PullRequestSkipped(f"{repository} is not registered in contracts/qa-targets.json.")
+        if target.platform != platform:
+            raise PullRequestSkipped(
+                f"{repository} is registered for the {target.platform.value} pipeline, not {platform.value}."
+            )
+
+        pr = self._fetch_runnable_pr(repository, pr_number)
+
+        return PullRequestContext(
+            repository=repository,
+            number=pr_number,
+            head_sha=pr["head"]["sha"],
+            head_ref=pr["head"]["ref"],
+            base_ref=pr["base"]["ref"],
+            body=pr.get("body") or "",
+            target=target,
+        )
+
+    def _fetch_runnable_pr(self, repository: str, pr_number: int) -> dict:
+        """Fetch a pull request whose code may run here: open, and not from a fork."""
+        pr = self._get(f"{self._api_base}/repos/{repository}/pulls/{pr_number}")
+
+        if pr.get("state") != "open":
+            raise PullRequestSkipped(f"{repository}#{pr_number} is {pr.get('state')}, not open.")
+
+        # A fork's code would run here with this repository's secrets. Checked against the
+        # API, so neither a Slack request nor a manual dispatch can bypass it.
+        head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name") or ""
+        if head_repo.lower() != repository.lower():
+            raise PullRequestSkipped(
+                f"{repository}#{pr_number} comes from a fork ({head_repo or 'deleted repository'}); "
+                "fork code is never run with this repository's secrets."
+            )
+        return pr
+
+    @staticmethod
+    def _require_trusted_backend(repository: str, target: QATarget) -> None:
+        """A backend is cloned and started beside the QA secrets, so only a registered one
+        may run. Anyone who can message the bot could otherwise run any repository here."""
+        if not target.allows_backend(repository):
+            raise PullRequestSkipped(
+                f"`{repository}` is not a registered backend for this repository. Allowed: "
+                f"{', '.join([target.backend_repo, *target.alternate_backend_repos])}. "
+                "Add it to `alternate_backend_repos` in contracts/qa-targets.json to allow it."
+            )
+
+    def resolve_backend(self, spec: str, target: QATarget) -> BackendChoice:
+        spec = (spec or "").strip()
+
+        if not spec:
+            return BackendChoice(mode=BackendMode.AUTO, repository=target.backend_repo)
+
+        if spec.lower() == "dev":
+            if not target.dev_api_url:
+                raise PullRequestSkipped(
+                    "the dev APIs are not configured for this repository. Set `dev_api_url` "
+                    "in contracts/qa-targets.json, or choose a backend PR or `main`."
+                )
+            return BackendChoice(
+                mode=BackendMode.DEV,
+                label=f"dev APIs ({target.dev_api_url})",
+                api_base_url=target.dev_api_url,
+            )
+
+        main = BACKEND_MAIN_SPEC.match(spec)
+        if main:
+            repository = main.group(1) or target.backend_repo
+            self._require_trusted_backend(repository, target)
+            # The registered backend's own default branch; any other repository's `main`.
+            branch = target.backend_default_branch if repository.lower() == target.backend_repo.lower() else "main"
+            return BackendChoice(
+                mode=BackendMode.BRANCH, repository=repository, ref=branch, label=f"{repository}@{branch}"
+            )
+
+        pull = BACKEND_PR_SPEC.match(spec)
+        if pull:
+            repository, number = pull.group(1), int(pull.group(2))
+            self._require_trusted_backend(repository, target)
+            pr = self._fetch_runnable_pr(repository, number)
+            return BackendChoice(
+                mode=BackendMode.PULL_REQUEST,
+                repository=repository,
+                ref=pr["head"]["sha"],
+                label=f"{repository}#{number} ({pr['head']['ref']})",
+            )
+
+        raise PullRequestSkipped(f"'{spec}' is not a backend choice. Use a backend PR, `main`, or `dev`.")
