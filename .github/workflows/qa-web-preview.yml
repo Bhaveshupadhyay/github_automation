@@ -366,17 +366,20 @@ jobs:
             --runner playwright \
             --base-url "$QA_BASE_URL" \
             --video-dir "$MEDIA_DIR/raw" \
-            --result-json "$RESULTS_DIR/run.json"
+            --result-json "$RESULTS_DIR/run.json" \
+            --selected-video-out "$RESULTS_DIR/selected-video.txt"
 
       - name: Compress the recording and build the preview GIF
         id: media
         if: always()
-        env:
-          # Read through the environment rather than interpolated into the script: the
-          # path originates from test runner output, which is untrusted text (Appendix B.3).
-          VIDEO: ${{ steps.tests.outputs.qa_primary_video }}
         run: |
           set -euo pipefail
+          # The runner owns the selection rule — a failed journey's recording first. Both
+          # pipelines read it from the same file, so neither re-derives it by globbing.
+          VIDEO=""
+          if [ -f "$RESULTS_DIR/selected-video.txt" ]; then
+            VIDEO=$(head -n 1 "$RESULTS_DIR/selected-video.txt")
+          fi
           if [ -z "$VIDEO" ] || [ ! -f "$VIDEO" ]; then
             echo "::notice::No recording was produced; publishing results without media."
             exit 0

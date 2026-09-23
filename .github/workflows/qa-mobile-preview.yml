@@ -397,16 +397,25 @@ jobs:
               --app-id "$BUNDLE_ID" \
               --base-url "${{ inputs.api-base-url }}" \
               --video-dir "$MEDIA_DIR/raw" \
-              --result-json "$RESULTS_DIR/run.json"
+              --result-json "$RESULTS_DIR/run.json" \
+              --selected-video-out "$RESULTS_DIR/selected-video.txt"
 
       - name: Compress the recording and build the preview GIF
         id: media
         if: always()
         run: |
           set -euo pipefail
-          # The emulator action runs the journeys in its own shell, so the recording is
-          # located here rather than read from a step output.
-          VIDEO=$(find "$MEDIA_DIR/raw" -maxdepth 1 -name '*.mp4' -print -quit 2>/dev/null || true)
+          # Read the runner's own selection rather than globbing the directory. On a
+          # multi-journey run a glob returns whichever file the filesystem lists first,
+          # which is usually a passing journey's recording instead of the failing one.
+          VIDEO=""
+          if [ -f "$RESULTS_DIR/selected-video.txt" ]; then
+            VIDEO=$(head -n 1 "$RESULTS_DIR/selected-video.txt")
+          fi
+          if [ -n "$VIDEO" ] && [ ! -f "$VIDEO" ]; then
+            echo "::warning::The selected recording is missing: $VIDEO"
+            VIDEO=""
+          fi
           if [ -z "$VIDEO" ]; then
             echo "::notice::No recording was produced; publishing results without media."
             exit 0

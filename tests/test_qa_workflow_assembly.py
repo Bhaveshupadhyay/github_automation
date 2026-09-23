@@ -267,6 +267,20 @@ class TestUntrustedTextHandling(unittest.TestCase):
                 # Passed as a file, so the resolver reads it rather than the shell re-parsing it.
                 self.assertIn("--pr-body-file", resolve["run"])
 
+    def test_the_media_step_reads_the_runners_selection_and_never_globs(self) -> None:
+        """Globbing the recording directory returns whichever file the filesystem lists
+        first, which on a multi-journey run publishes a passing journey's video while the
+        comment reports a failure."""
+        for name in REUSABLE_WORKFLOWS:
+            job = _preview_job(_load(WORKFLOW_DIR / name))
+            with self.subTest(workflow=name):
+                tests = job["steps"][_step_index(job, "Execute the")]
+                invocation = str(tests.get("run", "")) + str(tests.get("with", {}).get("script", ""))
+                self.assertIn("--selected-video-out", invocation)
+                media = job["steps"][_step_index(job, "Compress the recording")]
+                self.assertIn("selected-video.txt", media["run"])
+                self.assertNotIn("find ", media["run"])
+
     def test_decrypted_values_are_masked_before_export(self) -> None:
         """An unmasked value appears in plain text in the run log."""
         for name in REUSABLE_WORKFLOWS:

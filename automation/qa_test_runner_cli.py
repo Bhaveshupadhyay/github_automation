@@ -76,6 +76,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Where to write the TestRunResult JSON for qa-publish. Written on every exit path.",
     )
     parser.add_argument(
+        "--selected-video-out",
+        default=None,
+        help=(
+            "Where to write the path of the recording chosen for processing. A file, rather "
+            "than only a step output, so a runner invoked inside a third-party action can "
+            "still hand the selection to the next step."
+        ),
+    )
+    parser.add_argument(
         "--viewport",
         type=_parse_viewport,
         default="1280x720",
@@ -120,6 +129,23 @@ def _write_result_json(path: Optional[str], result) -> None:
         logger.info(f"Wrote test result JSON: {path}")
     except OSError as e:
         logger.warning(f"Could not write the test result JSON to {path}: {e}")
+
+
+def _write_selected_video(path: Optional[str], video: Optional[str]) -> None:
+    """Record which recording the media stage should process.
+
+    The selection rule lives here and nowhere else. A workflow that re-derived it — by
+    globbing the video directory, say — would publish whichever file the filesystem
+    happened to return first, which on a multi-journey run is usually a passing journey's
+    recording rather than the failing one the reviewer needs.
+    """
+    if not path:
+        return
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(f"{video or ''}\n", encoding="utf-8")
+    except OSError as e:
+        logger.warning(f"Could not write the selected recording path to {path}: {e}")
 
 
 def _write_github_outputs(**values: str) -> None:
@@ -252,6 +278,7 @@ def main() -> int:
 
     primary_video = _select_primary_video(result)
     _write_result_json(args.result_json, result)
+    _write_selected_video(args.selected_video_out, primary_video)
     _write_github_outputs(
         qa_primary_video=primary_video or "",
         qa_trace=result.trace_archive_path or "",

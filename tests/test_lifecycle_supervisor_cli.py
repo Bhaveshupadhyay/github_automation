@@ -185,6 +185,48 @@ class TestLifecycleSupervisorCIHandoff(unittest.TestCase):
         self.assertTrue(json.loads((self.root / "lifecycle.json").read_text(encoding="utf-8"))["success"])
 
     @patch("automation.lifecycle_supervisor_cli.get_lifecycle_supervisor")
+    def test_an_exception_during_startup_still_writes_the_result(self, mock_get_sup) -> None:
+        """Startup is where exceptions actually occur — an unreachable database, a
+        malformed tunnel config. Writing the result only for a politely-returned failure
+        omits the handoff artifact on the paths that most need explaining."""
+        mock_sup = MagicMock()
+        mock_get_sup.return_value = mock_sup
+        mock_sup.start_services.side_effect = RuntimeError("could not reach the database host")
+
+        with patch("sys.argv", self._args("--check-only")):
+            with patch("sys.stdout", new_callable=io.StringIO):
+                with patch("sys.stderr", new_callable=io.StringIO):
+                    with self.assertRaises(SystemExit) as cm:
+                        main()
+
+        self.assertEqual(cm.exception.code, 1)
+        written = json.loads((self.root / "lifecycle.json").read_text(encoding="utf-8"))
+        self.assertFalse(written["success"])
+        self.assertIn("could not reach the database host", written["error_message"])
+        # Anything spawned before the exception must not outlive the process.
+        mock_sup.terminate_all.assert_called_once()
+        self.assertFalse((self.root / "ready").exists())
+
+    @patch("automation.lifecycle_supervisor_cli.get_database_strategy")
+    @patch("automation.lifecycle_supervisor_cli.get_lifecycle_supervisor")
+    def test_a_failure_building_the_database_strategy_is_also_reported(
+        self, mock_get_sup, mock_get_db
+    ) -> None:
+        """This raises before the supervisor is ever called."""
+        mock_get_sup.return_value = MagicMock()
+        mock_get_db.side_effect = ValueError("WireGuard config is malformed")
+
+        with patch("sys.argv", self._args("--check-only", "--db-strategy", "cloud_dev")):
+            with patch("sys.stdout", new_callable=io.StringIO):
+                with patch("sys.stderr", new_callable=io.StringIO):
+                    with self.assertRaises(SystemExit) as cm:
+                        main()
+
+        self.assertEqual(cm.exception.code, 1)
+        written = json.loads((self.root / "lifecycle.json").read_text(encoding="utf-8"))
+        self.assertIn("WireGuard config is malformed", written["error_message"])
+
+    @patch("automation.lifecycle_supervisor_cli.get_lifecycle_supervisor")
     def test_the_pid_file_names_this_process(self, mock_get_sup) -> None:
         """A CI teardown step signals this PID; the wrong one leaves services running."""
         mock_sup = MagicMock()

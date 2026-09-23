@@ -11,6 +11,7 @@ from automation.domain.database_strategy import (
     DatabaseStrategyType,
     WireGuardConfig,
 )
+from automation.domain.lifecycle import LifecycleResult
 
 
 def main() -> None:
@@ -85,42 +86,65 @@ def main() -> None:
 
     supervisor = get_lifecycle_supervisor()
 
-    db_strategy = None
-    if args.db_strategy:
-        strat_type = DatabaseStrategyType(args.db_strategy)
-        wg_raw = args.wireguard_conf or os.getenv("WIREGUARD_CONF")
-        wg_cfg = None
-        if wg_raw:
-            wg_path = Path(wg_raw)
-            if wg_path.is_file():
-                wg_cfg = WireGuardConfig(config_file_path=str(wg_path))
-            else:
-                wg_cfg = WireGuardConfig(raw_config=wg_raw)
-        cfg = DatabaseConfig(
-            strategy_type=strat_type,
-            wireguard_config=wg_cfg,
-            connection_string=os.getenv("DATABASE_URL"),
+    # Database provisioning and startup are the paths most likely to raise — a malformed
+    # WireGuard config, an unreachable database, a contract that fails validation. The
+    # result file is promised to the next CI stage, so it is written for an exception too,
+    # not only for a LifecycleResult that reports failure politely.
+    startup_began = time.monotonic()
+    try:
+        db_strategy = None
+        if args.db_strategy:
+            strat_type = DatabaseStrategyType(args.db_strategy)
+            wg_raw = args.wireguard_conf or os.getenv("WIREGUARD_CONF")
+            wg_cfg = None
+            if wg_raw:
+                wg_path = Path(wg_raw)
+                if wg_path.is_file():
+                    wg_cfg = WireGuardConfig(config_file_path=str(wg_path))
+                else:
+                    wg_cfg = WireGuardConfig(raw_config=wg_raw)
+            cfg = DatabaseConfig(
+                strategy_type=strat_type,
+                wireguard_config=wg_cfg,
+                connection_string=os.getenv("DATABASE_URL"),
+            )
+            db_strategy = get_database_strategy(cfg)
+
+        backend_p = Path(args.backend_dir).resolve()
+        frontend_p = Path(args.frontend_dir).resolve() if args.frontend_dir else None
+
+        print(f"🚀 Starting Lifecycle Supervisor...")
+        print(f"   - Backend Dir: {backend_p}")
+        if frontend_p:
+            print(f"   - Frontend Dir: {frontend_p}")
+        if args.db_strategy:
+            print(f"   - DB Strategy: {args.db_strategy}")
+
+        result = supervisor.start_services(
+            backend_dir=backend_p,
+            frontend_dir=frontend_p,
+            db_strategy=db_strategy,
+            sops_age_key=args.sops_age_key,
+            backend_health_timeout=args.backend_timeout,
+            frontend_health_timeout=args.frontend_timeout,
         )
-        db_strategy = get_database_strategy(cfg)
+    except Exception as e:
+        result = LifecycleResult(
+            success=False,
+            error_message=f"Lifecycle startup raised before returning a result: {e}",
+            startup_duration_seconds=time.monotonic() - startup_began,
+        )
+        # Anything already spawned before the exception must not outlive this process.
+        try:
+            supervisor.terminate_all()
+        except Exception as cleanup_error:
+            print(f"⚠️ Cleanup after the startup error also failed: {cleanup_error}", file=sys.stderr)
 
-    backend_p = Path(args.backend_dir).resolve()
-    frontend_p = Path(args.frontend_dir).resolve() if args.frontend_dir else None
-
-    print(f"🚀 Starting Lifecycle Supervisor...")
-    print(f"   - Backend Dir: {backend_p}")
-    if frontend_p:
-        print(f"   - Frontend Dir: {frontend_p}")
-    if args.db_strategy:
-        print(f"   - DB Strategy: {args.db_strategy}")
-
-    result = supervisor.start_services(
-        backend_dir=backend_p,
-        frontend_dir=frontend_p,
-        db_strategy=db_strategy,
-        sops_age_key=args.sops_age_key,
-        backend_health_timeout=args.backend_timeout,
-        frontend_health_timeout=args.frontend_timeout,
-    )
+        if args.json:
+            print(result.model_dump_json(indent=2))
+        _write_result_json(args.result_json, result)
+        print(f"\n❌ Lifecycle Startup FAILED: {result.error_message}", file=sys.stderr)
+        sys.exit(1)
 
     if args.json:
         print(result.model_dump_json(indent=2))

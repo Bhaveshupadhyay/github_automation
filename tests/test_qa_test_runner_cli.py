@@ -123,6 +123,41 @@ class TestQATestRunnerCLI(unittest.TestCase):
         self.assertIn(f"qa_primary_video={failing_video}", outputs)
         self.assertIn(f"qa_trace={trace}", outputs)
 
+    def test_the_selection_is_written_to_a_file_for_the_next_step(self) -> None:
+        """A workflow that re-derived the selection by globbing would publish whichever
+        file the filesystem listed first — usually a passing journey's recording."""
+        passing_video = self._video("0_pass.webm")
+        failing_video = self._video("1_fail.webm")
+        selection = self.root / "selected-video.txt"
+        runner = MagicMock()
+        runner.execute.return_value = TestRunResult(
+            overall_outcome=TestOutcome.FAILED,
+            total_tests=2,
+            passed=1,
+            failed=1,
+            test_results=[
+                TestCaseResult(journey_name="A", outcome=TestOutcome.PASSED, video_path=passing_video),
+                TestCaseResult(journey_name="B", outcome=TestOutcome.FAILED, video_path=failing_video),
+            ],
+        )
+
+        self._run(runner, "--selected-video-out", str(selection))
+
+        self.assertEqual(selection.read_text(encoding="utf-8").strip(), failing_video)
+
+    def test_the_selection_file_is_written_empty_when_nothing_was_recorded(self) -> None:
+        """The consuming step distinguishes 'no recording' from 'file missing'."""
+        selection = self.root / "selected-video.txt"
+        runner = MagicMock()
+        runner.execute.return_value = TestRunResult(
+            overall_outcome=TestOutcome.PASSED, total_tests=1, passed=1
+        )
+
+        self._run(runner, "--selected-video-out", str(selection))
+
+        self.assertTrue(selection.is_file())
+        self.assertEqual(selection.read_text(encoding="utf-8").strip(), "")
+
     def test_runner_crash_still_writes_a_result(self) -> None:
         """A stage that promises the next one an artifact must write one when it fails."""
         runner = MagicMock()
