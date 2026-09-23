@@ -4,7 +4,8 @@
       "platform": "web",
       "backend_repo": "Bhaveshupadhyay/hiphomboombox_backend",
       "backend_default_branch": "main",
-      "frontend_url": "http://localhost:5173"
+      "frontend_url": "http://127.0.0.1:5173",
+      "dev_api_url": "https://hiphomboombox-backend.onrender.com"
     }
   }
 }
