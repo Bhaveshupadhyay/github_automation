@@ -138,6 +138,84 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// GA4 video events for the demo. The names match GA4's built-in video events
+// (video_start, video_progress, video_complete), so they appear in its standard
+// engagement reports. Each fires at most once per page view.
+const VIDEO_PROGRESS_MILESTONES = [10, 25, 50, 75, 90];
+
+function initDemoVideoAnalytics(video) {
+  const reached = new Set();
+  let started = false;
+  let completed = false;
+  let watchedSeconds = 0;
+  let lastTime = null;
+  let watchTimeSent = false;
+
+  const params = (extra = {}) => ({
+    video_title: video.getAttribute('title') || 'Demo video',
+    video_url: video.currentSrc || video.src,
+    video_provider: 'self-hosted',
+    video_duration: Math.round(video.duration || 0),
+    video_current_time: Math.round(video.currentTime),
+    event_category: 'Media',
+    ...extra
+  });
+
+  video.addEventListener('play', () => {
+    lastTime = video.currentTime;
+    if (!started) {
+      started = true;
+      trackEvent('video_start', params());
+    }
+  });
+
+  video.addEventListener('pause', () => { lastTime = null; });
+  video.addEventListener('seeking', () => { lastTime = null; });
+  video.addEventListener('seeked', () => {
+    if (!video.paused) lastTime = video.currentTime;
+  });
+
+  video.addEventListener('timeupdate', () => {
+    // Count only time actually played, not jumps from seeking.
+    if (lastTime !== null) {
+      const delta = video.currentTime - lastTime;
+      if (delta > 0 && delta < 2) watchedSeconds += delta;
+    }
+    if (!video.paused) lastTime = video.currentTime;
+
+    if (!video.duration) return;
+    const percent = (video.currentTime / video.duration) * 100;
+    VIDEO_PROGRESS_MILESTONES.forEach((milestone) => {
+      if (percent >= milestone && !reached.has(milestone)) {
+        reached.add(milestone);
+        trackEvent('video_progress', params({ video_percent: milestone }));
+      }
+    });
+  });
+
+  video.addEventListener('ended', () => {
+    lastTime = null;
+    if (!completed) {
+      completed = true;
+      trackEvent('video_complete', params({ video_percent: 100 }));
+    }
+  });
+
+  // Total seconds watched, sent once when the visitor leaves or hides the page.
+  const sendWatchTime = () => {
+    if (!started || watchTimeSent) return;
+    watchTimeSent = true;
+    trackEvent('video_watch_time', params({
+      watched_seconds: Math.round(watchedSeconds),
+      transport_type: 'beacon'
+    }));
+  };
+  window.addEventListener('pagehide', sendWatchTime);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') sendWatchTime();
+  });
+}
+
 // Custom controls for the demo video
 function initDemoPlayer() {
   const player = document.getElementById('demoPlayer');
@@ -152,7 +230,7 @@ function initDemoPlayer() {
   const total = document.getElementById('demoDuration');
   const fullscreen = document.getElementById('demoFullscreen');
   let idleTimer = null;
-  let tracked = false;
+  initDemoVideoAnalytics(video);
 
   const formatTime = (seconds) => {
     if (!Number.isFinite(seconds)) return '0:00';
@@ -191,10 +269,6 @@ function initDemoPlayer() {
     player.classList.remove('is-paused', 'is-fresh');
     playPause.setAttribute('aria-label', 'Pause');
     showControls();
-    if (!tracked) {
-      tracked = true;
-      trackEvent('demo_video_played', { event_category: 'Media' });
-    }
   });
   video.addEventListener('pause', () => {
     player.classList.add('is-paused');
