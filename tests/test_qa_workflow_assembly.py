@@ -479,6 +479,17 @@ class TestAgyPlanJob(unittest.TestCase):
         for command in ("npm ", "npx ", "yarn ", "pnpm ", "prepare", "lifecycle"):
             self.assertNotIn(command, runs)
 
+    def test_a_failed_agy_install_falls_back_instead_of_failing_the_run(self) -> None:
+        """agy is optional: the plan can still come from the Gemini API. A run once died
+        here because the install script arrived gzipped and `curl | bash` ran the bytes."""
+        plan = _job(_load(WORKFLOW_DIR / "qa-web-preview.yml"), "plan")
+        run = _step(plan, "Install agy")["run"]
+        commands = "\n".join(line for line in run.splitlines() if not line.strip().startswith("#"))
+        self.assertNotRegex(commands, r"curl[^\n]*\|\s*bash")
+        self.assertIn("1f8b", run)
+        self.assertIn("if ! install_agy; then", run)
+        self.assertIn("exit 0", run.split("if ! install_agy; then", 1)[1].split("fi", 1)[0])
+
     def test_the_login_is_removed_even_when_generation_fails(self) -> None:
         plan = _job(_load(WORKFLOW_DIR / "qa-web-preview.yml"), "plan")
         removal = _step(plan, "Remove the agy login")

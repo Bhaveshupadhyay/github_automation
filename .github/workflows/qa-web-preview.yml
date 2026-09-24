@@ -248,7 +248,9 @@ jobs:
       - name: Install QA tooling
         run: uv sync --project "$TOOLING_DIR" --extra qa
 
-      # Without the login there is no agy, and the generator goes straight to the API.
+      # Without the login there is no agy, and the generator goes straight to the API. agy
+      # is optional here: a failed install or login restore warns and falls back to the API
+      # rather than failing the run.
       - name: Install agy and restore its login
         env:
           AGY_AUTH_CONFIG: ${{ secrets.AGY_AUTH_CONFIG }}
@@ -259,16 +261,31 @@ jobs:
             echo "::notice::No agy login configured; the test plan will come from the Gemini API."
             exit 0
           fi
-          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          install_agy() {
+            local script="$RUNNER_TEMP/agy-install.sh"
+            curl -fsSL --compressed --retry 3 --retry-all-errors -o "$script" \
+              https://antigravity.google/cli/install.sh || return 1
+            # The server has sent this script gzipped without a Content-Encoding header,
+            # which `curl | bash` then tried to run as shell.
+            if [ "$(head -c 2 "$script" | od -An -tx1 | tr -d ' \n')" = "1f8b" ]; then
+              gunzip -c "$script" > "$script.plain" && mv "$script.plain" "$script" || return 1
+            fi
+            head -n 1 "$script" | grep -q '^#!' || { echo "The install script is not a shell script."; return 1; }
+            bash "$script"
+          }
+          if ! install_agy; then
+            echo "::warning::Could not install agy; the test plan will come from the Gemini API."
+            exit 0
+          fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.gemini/antigravity-cli/bin" >> "$GITHUB_PATH"
           echo "$HOME/.gemini/antigravity-cli" >> "$GITHUB_PATH"
           mkdir -p ~/.gemini/antigravity-cli ~/.gemini/config
-          if [ -n "$AGY_SESSION_DATA" ]; then
-            echo "$AGY_SESSION_DATA" | tr -d '\r\n ' | base64 -d > ~/.gemini/antigravity-cli/antigravity-oauth-token
+          if [ -n "$AGY_SESSION_DATA" ] && ! echo "$AGY_SESSION_DATA" | tr -d '\r\n ' | base64 -d > ~/.gemini/antigravity-cli/antigravity-oauth-token; then
+            echo "::warning::AGY_SESSION_DATA is not valid base64; agy may fail and fall back to the Gemini API."
           fi
-          if [ -n "$AGY_AUTH_CONFIG" ]; then
-            echo "$AGY_AUTH_CONFIG" | tr -d '\r\n ' | base64 -d > ~/.gemini/oauth_creds.json
+          if [ -n "$AGY_AUTH_CONFIG" ] && ! echo "$AGY_AUTH_CONFIG" | tr -d '\r\n ' | base64 -d > ~/.gemini/oauth_creds.json; then
+            echo "::warning::AGY_AUTH_CONFIG is not valid base64; agy may fail and fall back to the Gemini API."
           fi
 
       # The plan is cached by diff content, so re-running an unchanged commit reuses it
