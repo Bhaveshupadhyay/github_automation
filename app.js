@@ -115,15 +115,6 @@ function initGlobalClickTracking() {
         event_category: 'Simulator'
       });
     }
-
-    // 4. Track Fiverr freelance conversion CTAs
-    if (href.includes('fiverr.com')) {
-      trackEvent('fiverr_hire_click', {
-        cta_id: elementId || 'fiverr_link',
-        section_name: sectionName,
-        event_category: 'Freelance Lead'
-      });
-    }
   });
 }
 
@@ -133,6 +124,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize global click tracking delegation
   initGlobalClickTracking();
+
+  initDemoPlayer();
 
   const input = document.getElementById('slackInput');
   if (input) {
@@ -144,6 +137,130 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+// Custom controls for the demo video
+function initDemoPlayer() {
+  const player = document.getElementById('demoPlayer');
+  if (!player) return;
+
+  const video = player.querySelector('video');
+  const bigPlay = document.getElementById('demoBigPlay');
+  const playPause = document.getElementById('demoPlayPause');
+  const mute = document.getElementById('demoMute');
+  const seek = document.getElementById('demoSeek');
+  const current = document.getElementById('demoCurrent');
+  const total = document.getElementById('demoDuration');
+  const fullscreen = document.getElementById('demoFullscreen');
+  let idleTimer = null;
+  let tracked = false;
+
+  const formatTime = (seconds) => {
+    if (!Number.isFinite(seconds)) return '0:00';
+    const whole = Math.floor(seconds);
+    return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+  };
+
+  const togglePlay = () => {
+    if (video.paused || video.ended) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  };
+
+  const showControls = () => {
+    player.classList.remove('is-idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => player.classList.add('is-idle'), 2500);
+  };
+
+  const render = () => {
+    const duration = video.duration || 0;
+    const progress = duration ? (video.currentTime / duration) * 100 : 0;
+    seek.value = String(Math.round(progress * 10));
+    seek.style.setProperty('--progress', `${progress}%`);
+    if (video.buffered.length && duration) {
+      const buffered = (video.buffered.end(video.buffered.length - 1) / duration) * 100;
+      seek.style.setProperty('--buffered', `${buffered}%`);
+    }
+    current.textContent = formatTime(video.currentTime);
+    total.textContent = formatTime(duration);
+  };
+
+  video.addEventListener('play', () => {
+    player.classList.remove('is-paused', 'is-fresh');
+    playPause.setAttribute('aria-label', 'Pause');
+    showControls();
+    if (!tracked) {
+      tracked = true;
+      trackEvent('demo_video_played', { event_category: 'Media' });
+    }
+  });
+  video.addEventListener('pause', () => {
+    player.classList.add('is-paused');
+    playPause.setAttribute('aria-label', 'Play');
+  });
+  video.addEventListener('ended', () => player.classList.add('is-paused'));
+  video.addEventListener('timeupdate', render);
+  video.addEventListener('progress', render);
+  video.addEventListener('loadedmetadata', render);
+  video.addEventListener('volumechange', () => {
+    player.classList.toggle('is-muted', video.muted);
+    mute.setAttribute('aria-label', video.muted ? 'Unmute' : 'Mute');
+  });
+
+  video.addEventListener('click', togglePlay);
+  video.addEventListener('dblclick', () => fullscreen.click());
+  bigPlay.addEventListener('click', togglePlay);
+  playPause.addEventListener('click', togglePlay);
+  mute.addEventListener('click', () => { video.muted = !video.muted; });
+
+  seek.addEventListener('input', () => {
+    if (video.duration) {
+      video.currentTime = (Number(seek.value) / 1000) * video.duration;
+      render();
+    }
+  });
+
+  fullscreen.addEventListener('click', () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else if (player.requestFullscreen) {
+      player.requestFullscreen().catch(() => {});
+    } else if (video.webkitEnterFullscreen) {
+      // iPhone Safari can only put the video element itself in full screen.
+      video.webkitEnterFullscreen();
+    }
+  });
+
+  document.addEventListener('fullscreenchange', () => {
+    player.classList.toggle('is-fullscreen', document.fullscreenElement === player);
+    fullscreen.setAttribute('aria-label', document.fullscreenElement ? 'Exit full screen' : 'Full screen');
+  });
+
+  player.addEventListener('mousemove', showControls);
+  player.addEventListener('mouseleave', () => {
+    clearTimeout(idleTimer);
+    player.classList.add('is-idle');
+  });
+  player.addEventListener('touchstart', showControls, { passive: true });
+  player.addEventListener('focusin', showControls);
+
+  player.addEventListener('keydown', (e) => {
+    if (e.target === seek && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
+    if (e.key === ' ' || e.key === 'k') {
+      if (e.target.tagName === 'BUTTON' && e.key === ' ') return;
+      e.preventDefault();
+      togglePlay();
+    } else if (e.key === 'm') {
+      video.muted = !video.muted;
+    } else if (e.key === 'f') {
+      fullscreen.click();
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      video.currentTime += e.key === 'ArrowRight' ? 5 : -5;
+    }
+  });
+}
 
 // Interactive Slack Simulator Logic
 function runPrompt(promptText) {
