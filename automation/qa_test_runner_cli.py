@@ -182,6 +182,31 @@ def _select_primary_video(result) -> Optional[str]:
     return None
 
 
+def _join_journey_videos(result, video_dir: str) -> Optional[str]:
+    """Join every journey's recording, in plan order, for a run that passed.
+
+    Each journey records in its own browser context, so a passing run otherwise shows only
+    its first journey, often just a page loading. A failed run keeps the failing journey's
+    recording on its own, since that is where the reviewer looks.
+
+    Returns the joined MP4, or None when there is nothing to join or joining failed, in
+    which case the caller keeps the single recording it selected.
+    """
+    videos = [c.video_path for c in result.test_results if c.video_path and Path(c.video_path).is_file()]
+    if len(videos) < 2:
+        return None
+
+    from automation.core import get_media_processor_service
+
+    try:
+        return get_media_processor_service().concatenate_videos(
+            videos, str(Path(video_dir) / "all-journeys.mp4")
+        )
+    except Exception as e:
+        logger.warning(f"Could not join the journey recordings, publishing the first one only: {e}")
+        return None
+
+
 def _select_trace(result) -> Optional[str]:
     """Pick the trace archive belonging to the first failed journey."""
     from automation.domain.test_run import TestOutcome
@@ -277,6 +302,8 @@ def main() -> int:
         result.trace_archive_path = _select_trace(result)
 
     primary_video = _select_primary_video(result)
+    if result.overall_outcome is TestOutcome.PASSED:
+        primary_video = _join_journey_videos(result, args.video_dir) or primary_video
     _write_result_json(args.result_json, result)
     _write_selected_video(args.selected_video_out, primary_video)
     _write_github_outputs(

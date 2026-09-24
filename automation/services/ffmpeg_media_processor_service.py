@@ -99,6 +99,40 @@ class FFmpegMediaProcessorService(IMediaProcessorService):
             pass
         return None
 
+    def concatenate_videos(self, input_paths: list[str], output_path: str) -> str:
+        """Join recordings end to end into one near-lossless H.264 MP4.
+
+        The concat filter re-encodes, so recordings with restarted timestamps (one browser
+        context per journey) still join cleanly. The result is compressed later like any
+        single recording.
+        """
+        paths = [Path(p) for p in input_paths]
+        missing = [str(p) for p in paths if not p.is_file()]
+        if missing:
+            raise FileNotFoundError(f"Recordings not found: {missing}")
+        if not self.is_ffmpeg_available():
+            raise RuntimeError(f"FFmpeg binary not found at '{self._ffmpeg_binary}'. Cannot join recordings.")
+
+        out_p = Path(output_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+
+        args = ["-y"]
+        for p in paths:
+            args += ["-i", str(p)]
+        streams = "".join(f"[{i}:v]" for i in range(len(paths)))
+        args += [
+            "-filter_complex", f"{streams}concat=n={len(paths)}:v=1:a=0[v]",
+            "-map", "[v]",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "18",
+            "-pix_fmt", "yuv420p",
+            str(out_p),
+        ]
+        self._run_ffmpeg(args, description=f"joining {len(paths)} recordings")
+        logger.info(f"Joined {len(paths)} recordings -> {out_p.name}")
+        return str(out_p.resolve())
+
     def compress_video(
         self,
         input_path: str,
