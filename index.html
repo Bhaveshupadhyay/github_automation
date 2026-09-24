@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AutoPR Slack AI — Autonomous AI Developer Slackbot</title>
-  <meta name="description" content="Turn Slack messages into GitHub Pull Requests instantly using Google Antigravity AI Engine and Cloudflare Worker Edge." />
+  <meta name="description" content="Turn Slack messages into GitHub Pull Requests, then QA-test them with recorded browser runs, using Google Antigravity AI Engine and Cloudflare Worker Edge." />
 
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-WRTRH44MBB"></script>
@@ -45,6 +45,7 @@
         <li><a href="#simulator" id="nav-link-simulator">Live Sandbox</a></li>
         <li><a href="#features" id="nav-link-features">Features</a></li>
         <li><a href="#architecture" id="nav-link-architecture">Architecture</a></li>
+        <li><a href="#qa" id="nav-link-qa">QA</a></li>
         <li><a href="#setup" id="nav-link-setup">Setup Guide</a></li>
         <li><a href="#services" id="nav-link-services">Custom AI Setup</a></li>
       </ul>
@@ -100,7 +101,7 @@
         Turn Slack Queries Into GitHub Pull Requests
       </h1>
       <p class="lead">
-        Type <code class="slack-cmd">/code Add Redis caching to get_user_profile</code> directly in Slack. Our autonomous AI developer inspects your codebase, writes precision diffs, passes tests, and opens a clean GitHub PR in seconds.
+        Type <code class="slack-cmd">/code Add Redis caching to get_user_profile</code> directly in Slack. Our autonomous AI developer inspects your codebase, writes precision diffs, passes tests, and opens a clean GitHub PR in seconds. Then reply <code class="slack-cmd">@AutoPR AI run QA on this PR</code> and it runs your app, tests the change, and posts the recording back to the PR.
       </p>
 
       <div class="hero-cta">
@@ -216,6 +217,7 @@
             <button type="button" class="chip" id="chip-prompt-redis" onclick="runPrompt('/code Add Redis caching to get_user_profile endpoint')">/code Add Redis caching</button>
             <button type="button" class="chip" id="chip-prompt-darkmode" onclick="runPrompt('/code Add dark mode toggle in navbar')">/code Add dark mode toggle</button>
             <button type="button" class="chip" id="chip-prompt-tests" onclick="runPrompt('/code Write pytest unit tests for webhook payload handler')">/code Write pytest unit tests</button>
+            <button type="button" class="chip" id="chip-prompt-qa" onclick="runPrompt('@AutoPR AI run QA on this PR')">@AutoPR AI run QA on this PR</button>
           </div>
 
           <div class="input-box-wrapper">
@@ -388,6 +390,75 @@
           <p>Opens PR, runs test suite, and posts updates back to Slack thread.</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- On-Demand QA Testing Section -->
+  <section id="qa" class="architecture-section">
+    <div class="container">
+      <div class="section-header">
+        <h2>On-Demand QA Testing</h2>
+        <p>Ask the bot to test a pull request. It runs the app, drives it through test journeys written from the diff, and brings back the recording.</p>
+      </div>
+
+      <div class="flow-diagram">
+        <div class="flow-step">
+          <div class="flow-number">1</div>
+          <div class="flow-logo-badge badge-slack">
+            <img src="slack.svg" width="48" height="48" alt="Slack Logo" />
+          </div>
+          <h4>Ask in the Thread</h4>
+          <p>Tag the bot where it opened the PR: <code>@AutoPR AI run QA on this PR</code>. Or name one: <code>QA test owner/web#12</code>.</p>
+        </div>
+
+        <div class="flow-arrow">➔</div>
+
+        <div class="flow-step">
+          <div class="flow-number">2</div>
+          <div class="flow-logo-badge badge-cloudflare">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#F38020" stroke-width="2">
+              <ellipse cx="12" cy="5" rx="8" ry="3"></ellipse>
+              <path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"></path>
+              <path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"></path>
+            </svg>
+          </div>
+          <h4>Pick a Backend</h4>
+          <p>Reply with a backend PR, <code>main</code>, or <code>dev</code> for the deployed dev API. Name both PRs up front and it starts at once.</p>
+        </div>
+
+        <div class="flow-arrow">➔</div>
+
+        <div class="flow-step">
+          <div class="flow-number">3</div>
+          <div class="flow-logo-badge badge-antigravity">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2">
+              <polygon points="23 7 16 12 23 17 23 7"></polygon>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+            </svg>
+          </div>
+          <h4>Run &amp; Record</h4>
+          <p>Starts the database, backend and frontend, then runs Playwright (web) or Maestro (Android) journeys from the diff, recording video.</p>
+        </div>
+
+        <div class="flow-arrow">➔</div>
+
+        <div class="flow-step">
+          <div class="flow-number">4</div>
+          <div class="flow-logo-badge badge-github">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+          </div>
+          <h4>Results on the PR</h4>
+          <p>One PR comment with the verdict, video and preview GIF, plus a reply in the Slack thread. Failed runs post their recording too.</p>
+        </div>
+      </div>
+
+      <p style="color: var(--text-muted); text-align: center; margin-top: 2.5rem; font-size: 0.95rem; line-height: 1.7;">
+        QA runs centrally in your automation repository, so the repositories under test need no workflow and no secrets.<br>
+        Forked and unregistered PRs are refused, and PR code never runs next to your GitHub or storage credentials.
+      </p>
     </div>
   </section>
 
