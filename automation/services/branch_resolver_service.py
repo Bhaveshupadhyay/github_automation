@@ -333,7 +333,6 @@ class BranchResolverService(IBranchResolver):
                 client = genai.Client(
                     api_key=self._api_key,
                     http_options=types.HttpOptions(
-                        headers={"X-goog-api-key": self._api_key},
                         timeout=10_000,
                     ),
                 )

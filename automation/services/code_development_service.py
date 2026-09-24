@@ -150,12 +150,20 @@ class CodeDevelopmentService(ICodeDevelopmentService):
                     logger.debug(f"Copying {agent_sub} skipped: {e}")
 
         # Step 5: Stream Execution of Native Google Antigravity CLI (agy) Engine in Current Directory '.'
-        workspace_rule = "\n\nCRITICAL WORKSPACE RULE: You MUST modify and edit existing files ONLY inside the current working directory ('.'). Never create new subfolders in ~/.gemini/antigravity-cli/scratch or any external directory."
+        # agy resolves a relative --add-dir against its own scratch workspace, not the process
+        # cwd, and then sometimes edits a copy there that git never sees. Name the checkout
+        # by its absolute path, in the flag and in the prompt.
+        workspace_dir = os.getcwd()
+        workspace_rule = (
+            f"\n\nCRITICAL WORKSPACE RULE: The repository is checked out at {workspace_dir}. "
+            f"Edit files ONLY inside {workspace_dir}. Never clone the repository again and never "
+            "write to ~/.gemini/antigravity-cli/scratch or any other directory."
+        )
         full_prompt = f"{self.config.user_prompt}{thread_history}{workspace_rule}\n\n### Mandatory Graphify AST Knowledge Context:\n{graph_context}"
         agy_model = DEFAULT_AGY_MODEL
         effort_val = self.config.effort_val if self.config.effort_val else "high"
         
-        logger.info(f"Executing Native Antigravity CLI (agy) with model {agy_model}, --effort {effort_val}, --add-dir ., --print-timeout 15m0s...")
+        logger.info(f"Executing Native Antigravity CLI (agy) with model {agy_model}, --effort {effort_val}, --add-dir {workspace_dir}, --print-timeout 15m0s...")
         
         if self.telemetry_service:
             self.telemetry_service.update_stage(PipelineStage.AGY_EXECUTION, f"Executing {agy_model}...")
@@ -164,7 +172,7 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         cmd = [
             agy_bin, "--print", full_prompt,
             "--dangerously-skip-permissions",
-            "--add-dir", ".",
+            "--add-dir", workspace_dir,
             "--model", agy_model,
             "--effort", effort_val,
             "--print-timeout", "15m0s"
@@ -172,7 +180,7 @@ class CodeDevelopmentService(ICodeDevelopmentService):
         
         agy_output_lines = []
         with open(self.config.execution_log_path, "w", encoding="utf-8") as log_file:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            proc = subprocess.Popen(cmd, cwd=workspace_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             for line in proc.stdout:
                 sys.stdout.write(line)
                 sys.stdout.flush()
