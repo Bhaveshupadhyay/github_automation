@@ -1210,3 +1210,254 @@ h1, h2, h3, h4 {
   .services-grid { grid-template-columns: 1fr; }
 }
 
+
+/* Demo Video Player */
+.demo-player {
+  position: relative;
+  max-width: 980px;
+  margin: 0 auto;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.7), 0 0 80px rgba(99, 102, 241, 0.18);
+  isolation: isolate;
+}
+
+.demo-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  cursor: pointer;
+}
+
+/* Dims the frame behind the big play button until playback starts. */
+.demo-player::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(9, 13, 22, 0.15), rgba(9, 13, 22, 0.55));
+  pointer-events: none;
+  transition: opacity 0.35s ease;
+}
+
+.demo-player:not(.is-paused)::after {
+  opacity: 0;
+}
+
+.demo-big-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: 88px;
+  height: 88px;
+  padding-left: 5px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(168, 85, 247, 0.95));
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 12px 40px rgba(99, 102, 241, 0.55);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, box-shadow 0.3s ease;
+}
+
+.demo-big-play::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  border: 2px solid rgba(129, 140, 248, 0.5);
+  animation: demo-pulse 2.2s ease-out infinite;
+}
+
+@keyframes demo-pulse {
+  0% { transform: scale(0.9); opacity: 0.9; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+
+.demo-big-play:hover {
+  transform: translate(-50%, -50%) scale(1.07);
+  box-shadow: 0 16px 50px rgba(99, 102, 241, 0.75);
+}
+
+.demo-player:not(.is-paused) .demo-big-play {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.85);
+  pointer-events: none;
+}
+
+/* Floating glass control bar */
+.demo-controls {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-full);
+  background: rgba(9, 13, 22, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Hidden until first play, and while playing with an idle pointer. */
+.demo-player.is-fresh .demo-controls,
+.demo-player.is-idle:not(.is-paused) .demo-controls {
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+}
+
+.demo-player.is-idle:not(.is-paused) .demo-video {
+  cursor: none;
+}
+
+.demo-btn {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(248, 250, 252, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.demo-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.demo-btn-play {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.5);
+}
+
+.demo-btn-play .icon-play {
+  margin-left: 2px;
+}
+
+.demo-btn-play:hover {
+  background: var(--primary-hover);
+  transform: scale(1.06);
+}
+
+.demo-time {
+  flex: none;
+  min-width: 2.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.demo-time-total {
+  color: var(--text-muted);
+}
+
+.demo-seek {
+  --progress: 0%;
+  --buffered: 0%;
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.demo-seek::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: var(--radius-full);
+  background:
+    linear-gradient(to right, var(--primary), var(--accent-purple)) 0 0 / var(--progress) 100% no-repeat,
+    linear-gradient(rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.28)) 0 0 / var(--buffered) 100% no-repeat,
+    rgba(255, 255, 255, 0.12);
+}
+
+.demo-seek::-moz-range-track {
+  height: 5px;
+  border-radius: var(--radius-full);
+  background:
+    linear-gradient(to right, var(--primary), var(--accent-purple)) 0 0 / var(--progress) 100% no-repeat,
+    linear-gradient(rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.28)) 0 0 / var(--buffered) 100% no-repeat,
+    rgba(255, 255, 255, 0.12);
+}
+
+.demo-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  border: none;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.35), 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: transform 0.15s ease;
+}
+
+.demo-seek::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: none;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.35), 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: transform 0.15s ease;
+}
+
+.demo-seek:hover::-webkit-slider-thumb { transform: scale(1.2); }
+.demo-seek:hover::-moz-range-thumb { transform: scale(1.2); }
+
+.demo-btn:focus-visible,
+.demo-big-play:focus-visible,
+.demo-seek:focus-visible {
+  outline: 2px solid #a5b4fc;
+  outline-offset: 2px;
+}
+
+.demo-player .icon-pause,
+.demo-player .icon-muted,
+.demo-player .icon-collapse { display: none; }
+.demo-player:not(.is-paused) .icon-pause { display: block; }
+.demo-player:not(.is-paused) .icon-play { display: none; }
+.demo-player.is-muted .icon-muted { display: block; }
+.demo-player.is-muted .icon-sound { display: none; }
+.demo-player.is-fullscreen .icon-collapse { display: block; }
+.demo-player.is-fullscreen .icon-expand { display: none; }
+
+.demo-player:fullscreen {
+  max-width: none;
+  border-radius: 0;
+  aspect-ratio: auto;
+}
+
+@media (max-width: 600px) {
+  .demo-player { border-radius: var(--radius-md); }
+  .demo-big-play { width: 64px; height: 64px; }
+  .demo-big-play svg { width: 24px; height: 24px; }
+  .demo-controls { left: 8px; right: 8px; bottom: 8px; gap: 0.25rem; padding: 0.3rem 0.4rem; }
+  .demo-btn { width: 32px; height: 32px; }
+  .demo-time { min-width: 2.2rem; font-size: 0.7rem; }
+  .demo-time-total { display: none; }
+}

@@ -18,7 +18,7 @@
     });
   </script>
 
-  <link rel="stylesheet" href="style.css"/>
+  <link rel="stylesheet" href="style.css?v=2026-09-24"/>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -122,6 +122,41 @@
           <span style="color: #f8fafc; font-weight: 500;">npx autopr-slack</span>
         </div>
         <button class="copy-btn" id="hero-copy-npx" style="position: static; padding: 0.4rem 0.9rem; font-size: 0.8rem; border-radius: 9999px;" onclick="copyCode('npx autopr-slack', event)">Copy</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Product Demo Video -->
+  <section id="demo" class="demo-section">
+    <div class="container">
+      <div class="section-header">
+        <h2>See It in Action</h2>
+        <p>A 90-second walkthrough of AutoPR Slack AI at work.</p>
+      </div>
+      <div class="demo-player is-paused is-fresh" id="demoPlayer">
+        <video class="demo-video" src="https://pub-4a29d5bc45754e1e9ab37c133e4e92b9.r2.dev/github.mp4" poster="demo-poster.jpg" playsinline preload="metadata" disablepictureinpicture title="AutoPR Slack AI demo"></video>
+
+        <button type="button" class="demo-big-play" id="demoBigPlay" aria-label="Play demo video">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.85l10.9-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z"/></svg>
+        </button>
+
+        <div class="demo-controls">
+          <button type="button" class="demo-btn demo-btn-play" id="demoPlayPause" aria-label="Play">
+            <svg class="icon-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.85l10.9-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z"/></svg>
+            <svg class="icon-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4.5" width="4" height="15" rx="1.2"/><rect x="14" y="4.5" width="4" height="15" rx="1.2"/></svg>
+          </button>
+          <span class="demo-time" id="demoCurrent">0:00</span>
+          <input type="range" class="demo-seek" id="demoSeek" min="0" max="1000" step="1" value="0" aria-label="Seek" />
+          <span class="demo-time demo-time-total" id="demoDuration">0:00</span>
+          <button type="button" class="demo-btn" id="demoMute" aria-label="Mute">
+            <svg class="icon-sound" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z" fill="currentColor"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            <svg class="icon-muted" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z" fill="currentColor"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+          </button>
+          <button type="button" class="demo-btn" id="demoFullscreen" aria-label="Full screen">
+            <svg class="icon-expand" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+            <svg class="icon-collapse" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </section>
@@ -713,6 +748,6 @@
     </div>
   </footer>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2026-09-24"></script>
 </body>
 </html>
