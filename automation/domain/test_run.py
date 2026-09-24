@@ -29,6 +29,12 @@ class TestRunConfig(BaseModel):
     viewport_height: int = Field(default=720, description="Browser viewport height in pixels")
     trace_on_failure: bool = Field(default=True, description="Capture trace artifacts on test failure")
     timeout_ms: int = Field(default=30000, description="Default action timeout in milliseconds")
+    slow_mo_ms: int = Field(
+        default=250, description="Pause after each browser operation, so the recording can be followed"
+    )
+    final_hold_ms: int = Field(
+        default=1500, description="Time to stay on a journey's last screen before closing, so its outcome is seen"
+    )
 
 
 class TestCaseResult(BaseModel):

@@ -202,7 +202,9 @@ class PlaywrightTestRunnerService(ITestRunnerService):
 
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=config.headless)
+                # Without slow_mo a journey is over in a second or two, too fast to follow
+                # in the recording.
+                browser = p.chromium.launch(headless=config.headless, slow_mo=config.slow_mo_ms)
                 
                 for i, journey in enumerate(config.test_plan.journeys):
                     journey_start_time = time.time()
@@ -284,6 +286,12 @@ class PlaywrightTestRunnerService(ITestRunnerService):
                             except:
                                 pass
                                 
+                        # Stay on the last screen so the recording shows how the journey ended.
+                        try:
+                            page.wait_for_timeout(config.final_hold_ms)
+                        except Exception:
+                            pass
+
                         video = page.video
                         video_path = None
                         if video:

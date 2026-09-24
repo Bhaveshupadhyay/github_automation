@@ -52,6 +52,22 @@ class IMediaProcessorService(ABC):
         pass
 
     @abstractmethod
+    def concatenate_videos(self, input_paths: list[str], output_path: str) -> str:
+        """Join recordings end to end, in order, into one MP4.
+
+        Args:
+            input_paths: Recordings to join, all the same frame size.
+            output_path: Path for the joined MP4.
+
+        Returns:
+            The output path.
+
+        Raises:
+            RuntimeError: When FFmpeg is missing or fails.
+        """
+        pass
+
+    @abstractmethod
     def process(
         self,
         raw_video_path: str,
