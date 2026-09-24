@@ -8,11 +8,7 @@
 
 AutoPR Slack AI is a **zero-clone, serverless autonomous AI developer pipeline**. It turns natural language task requests from Slack into tested, production-grade GitHub Pull Requests in seconds, and QA-tests those pull requests on request: it runs the app, drives it through generated test journeys, and posts the recording back to the PR and the Slack thread.
 
-## Demo
-
-[![Watch the AutoPR Slack AI demo on Vimeo](https://i.vimeocdn.com/filter/overlay?src0=https%3A%2F%2Fi.vimeocdn.com%2Fvideo%2F2204602366-473b3f38c8ab096018d77424960c37ef4db33e7c8bd7a8e533bbfaaa8cf036b4-d_1280%3Fregion%3Dus&src1=http%3A%2F%2Ff.vimeocdn.com%2Fp%2Fimages%2Fcrawler_play.png)](https://vimeo.com/1229847079)
-
-▶ [Watch the demo on Vimeo](https://vimeo.com/1229847079) (1:29)
+▶ **Check the demo [here](https://code.clientmanger.tech/?utm_source=github&utm_medium=readme#demo).**
 
 ---
 
