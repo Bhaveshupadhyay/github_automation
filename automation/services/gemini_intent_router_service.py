@@ -43,12 +43,11 @@ class GeminiIntentRouterService(IIntentRouterService):
             prompt_content = f"Target Repository: {self.config.target_repo}\nUser Prompt: {self.config.user_prompt}"
             api_model = normalize_gemini_model(self.config.model_name)
 
-            # 1. Attempt official google-genai SDK call with X-goog-api-key header
+            # 1. Attempt official google-genai SDK call (it sends the key header itself)
             try:
                 client = genai.Client(
                     api_key=api_key,
                     http_options=types.HttpOptions(
-                        headers={"X-goog-api-key": api_key},
                         # Milliseconds: 15.0 here meant 15 ms.
                         timeout=15_000
                     )

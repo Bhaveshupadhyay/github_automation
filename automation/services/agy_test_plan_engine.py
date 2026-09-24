@@ -139,7 +139,8 @@ class AgyTestPlanEngine(ITestPlanEngine):
                 binary, "--print", prompt,
                 "--dangerously-skip-permissions",
                 "--disable-slash-commands",
-                "--add-dir", ".",
+                # Absolute: agy resolves a relative --add-dir against its scratch workspace.
+                "--add-dir", str(worktree),
                 "--model", self._model,
                 "--effort", self._effort,
                 "--output-format", "json",
