@@ -655,6 +655,7 @@ jobs:
             --pr "$TARGET_PR" \
             --sha "$HEAD_SHA" \
             --test-result "$RESULTS_DIR/run.json" \
+            --plan "$RESULTS_DIR/plan.json" \
             --media-result "$RESULTS_DIR/media.json" \
             --branch-result "$RESULTS_DIR/branch.json" \
             --run-url "$RUN_URL"

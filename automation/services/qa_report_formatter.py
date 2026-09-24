@@ -104,6 +104,23 @@ class QAReportFormatter:
 
         return lines
 
+    @staticmethod
+    def _format_plan_notice(report: QAReport) -> list[str]:
+        """Say so when the run tested only that the app loads, not the change itself."""
+        if report.plan_degraded:
+            return [
+                "> ⚠️ **This run did not test your change.** No test plan could be generated for "
+                "the diff (the model was unavailable), so only a smoke test that the app loads ran. "
+                "Re-run the workflow job to try again.",
+                "",
+            ]
+        if report.plan_fallback:
+            return [
+                "> ℹ️ No user-facing changes were found in the diff, so only a smoke test that the app loads ran.",
+                "",
+            ]
+        return []
+
     def _format_failures(self, report: QAReport) -> list[str]:
         """Render per-journey diagnostics for a failed run."""
         failures = report.failed_cases
@@ -174,6 +191,7 @@ class QAReportFormatter:
             lines.append("**Some journeys failed.** The recording below shows where it broke.")
         lines.append("")
 
+        lines.extend(self._format_plan_notice(report))
         lines.extend(self._format_media_section(report))
         lines.extend(self._format_context(report))
 
@@ -214,6 +232,8 @@ class QAReportFormatter:
             f"• Commit: `{report.short_sha}`",
             f"• Journeys: {result.passed} passed, {result.failed} failed",
         ]
+        if report.plan_degraded:
+            parts.append("• ⚠️ No test plan could be generated, so only an app-loads smoke test ran")
         if report.backend_branch:
             parts.append(f"• Backend branch: `{report.backend_branch}`")
         if report.video:

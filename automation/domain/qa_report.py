@@ -37,6 +37,13 @@ class QAReport(BaseModel):
         default=False, description="True when the primary backend failed and artifacts were used instead"
     )
 
+    plan_fallback: bool = Field(
+        default=False, description="True when the baseline smoke test ran instead of a plan written for the diff"
+    )
+    plan_degraded: bool = Field(
+        default=False, description="True when the fallback was caused by an error rather than by the diff"
+    )
+
     @property
     def passed(self) -> bool:
         return self.test_result.overall_outcome is TestOutcome.PASSED

@@ -92,6 +92,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--test-result", default=None, help="Path to the TestRunResult JSON from the test runner.")
     parser.add_argument("--media-result", default=None, help="Path to the MediaProcessingResult JSON from qa-media.")
+    parser.add_argument("--plan", default=None, help="Path to the TestPlan JSON the runner executed.")
     parser.add_argument("--branch-result", default=None, help="Path to the BranchResolutionResult JSON.")
     parser.add_argument("--trace", default=None, help="Path to a Playwright trace archive to publish on failure.")
     parser.add_argument("--run-url", default=None, help="Workflow run URL to link from the comment.")
@@ -135,6 +136,7 @@ def main() -> int:
     from automation.domain.media_processing import MediaProcessingResult
     from automation.domain.qa_report import QAReport
     from automation.domain.storage import ArtifactKind
+    from automation.domain.test_plan import TestPlan
     from automation.domain.test_run import TestOutcome, TestRunResult
     from automation.services.r2_storage_provider import build_remote_key
 
@@ -187,6 +189,14 @@ def main() -> int:
         except ValidationError as e:
             logger.warning(f"Branch resolution JSON is malformed, continuing without it: {e}")
 
+    plan_raw = _load_json(args.plan, "Test plan")
+    plan = None
+    if plan_raw is not None:
+        try:
+            plan = TestPlan.model_validate(plan_raw)
+        except ValidationError as e:
+            logger.warning(f"Test plan JSON is malformed, continuing without it: {e}")
+
     # 2. Publish the media, degrading to workflow artifacts on any failure.
     storage = get_storage_provider()
     uploads: dict[ArtifactKind, object] = {}
@@ -225,6 +235,8 @@ def main() -> int:
         run_url=args.run_url,
         storage_provider=storage.provider_type if uploads else None,
         storage_degraded=storage.degraded,
+        plan_fallback=bool(plan and plan.source == "fallback_baseline"),
+        plan_degraded=bool(plan and plan.degraded),
     )
 
     formatter = get_qa_report_formatter()
