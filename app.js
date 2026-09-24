@@ -30,12 +30,22 @@ function trackEvent(eventName, eventParams = {}) {
  */
 function categorizePrompt(prompt) {
   const text = (prompt || '').toLowerCase();
+  if (isQaPrompt(text)) return 'qa_testing';
   if (text.includes('redis') || text.includes('cache')) return 'caching';
   if (text.includes('dark mode') || text.includes('theme') || text.includes('css')) return 'ui_styling';
   if (text.includes('test') || text.includes('pytest') || text.includes('unit')) return 'testing';
   if (text.includes('auth') || text.includes('race') || text.includes('token') || text.includes('lock')) return 'auth_security';
   if (text.includes('api') || text.includes('webhook') || text.includes('endpoint')) return 'api_development';
   return 'general_code_refactoring';
+}
+
+/**
+ * A QA request asks the bot to test an existing PR rather than write code
+ * @param {string} prompt
+ * @returns {boolean}
+ */
+function isQaPrompt(prompt) {
+  return /\bqa\b/i.test(prompt || '');
 }
 
 /**
@@ -200,7 +210,9 @@ function submitPrompt(source = 'button_click') {
         </div>
         <div class="msg-text" style="color: #9ca3af; display: flex; align-items: center; gap: 0.5rem;">
           <span class="indicator active" style="width: 8px; height: 8px; border-radius: 50%; background: #6366f1; display: inline-block;"></span>
-          Receiving webhook on Cloudflare Edge... Spawning Antigravity Engine (\`agy\`) on GitHub Actions VM...
+          ${isQaPrompt(promptText)
+            ? 'Finding the PR in this thread... Starting database, backend and frontend on a GitHub Actions VM...'
+            : 'Receiving webhook on Cloudflare Edge... Spawning Antigravity Engine (\`agy\`) on GitHub Actions VM...'}
         </div>
       </div>
     </div>
@@ -213,7 +225,14 @@ function submitPrompt(source = 'button_click') {
   // 3. Simulate AI Reasoning & PR Creation Response after 1.2s delay
   setTimeout(() => {
     const loadingElem = document.getElementById(loadingId);
-    if (loadingElem) {
+    if (loadingElem && isQaPrompt(promptText)) {
+      trackEvent('simulator_qa_generated', {
+        prompt_category: 'qa_testing',
+        event_category: 'Simulator'
+      });
+      loadingElem.outerHTML = generateQaResult(nowTime);
+      chatList.scrollTop = chatList.scrollHeight;
+    } else if (loadingElem) {
       const branchName = generateBranchName(promptText);
       const prNumber = Math.floor(Math.random() * 80) + 120;
       const diffCode = generateDiff(promptText);
@@ -260,6 +279,44 @@ function submitPrompt(source = 'button_click') {
       chatList.scrollTop = chatList.scrollHeight;
     }
   }, 1200);
+}
+
+// Simulated QA run result for a QA request
+function generateQaResult(nowTime) {
+  return `
+    <div class="message-item">
+      <div class="avatar avatar-bot">⚡</div>
+      <div class="msg-content">
+        <div class="msg-header">
+          <span class="sender-name">AutoPR AI Bot</span>
+          <span class="bot-tag">APP</span>
+          <span class="msg-time">Today at ${nowTime}</span>
+        </div>
+        <div class="msg-text">
+          🧪 QA run finished against backend <code>main</code>. Results are on the PR.
+        </div>
+
+        <div class="slack-attachment">
+          <div class="attachment-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+            QA Passed: 4 of 4 journeys
+          </div>
+          <div class="diff-preview">
+            <span class="diff-add">✓ Admin can view the posts table</span><br>
+            <span class="diff-add">✓ Admin can add a post</span><br>
+            <span class="diff-add">✓ Admin can edit a post's title</span><br>
+            <span class="diff-add">✓ Admin can delete a post after confirming</span>
+          </div>
+          <div style="font-size: 0.9rem; color: var(--text-muted); margin-top: 0.6rem;">
+            🎥 <a href="#" class="pr-link" style="color: #38bdf8; text-decoration: none;">Watch the recording</a> · Posted to the PR comment
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 // Generate Branch Name from Prompt
