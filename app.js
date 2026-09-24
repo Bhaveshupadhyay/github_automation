@@ -115,15 +115,6 @@ function initGlobalClickTracking() {
         event_category: 'Simulator'
       });
     }
-
-    // 4. Track Fiverr freelance conversion CTAs
-    if (href.includes('fiverr.com')) {
-      trackEvent('fiverr_hire_click', {
-        cta_id: elementId || 'fiverr_link',
-        section_name: sectionName,
-        event_category: 'Freelance Lead'
-      });
-    }
   });
 }
 
