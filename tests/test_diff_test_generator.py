@@ -23,6 +23,7 @@ from automation.services.gemini_diff_test_generator_service import (
     MAX_CACHE_ENTRIES,
     MAX_DIFF_CHARS,
     MAX_JOURNEYS,
+    RETRY_DELAYS_SECONDS,
 )
 
 
@@ -645,6 +646,80 @@ class TestDeclaredRoutes:
         context = "Declared routes:\n- /admin"
         service.cache_key.assert_called_once_with(SAMPLE_UI_DIFF, context)
         assert service.generate_test_plan.call_args.kwargs["component_context"] == context
+
+
+# --- Test: Transient Gemini errors are retried ---
+
+class _ApiError(Exception):
+    """Stands in for google.genai.errors.APIError, which carries the HTTP status as `code`."""
+
+    def __init__(self, code: int):
+        super().__init__(f"{code} UNAVAILABLE")
+        self.code = code
+
+
+class TestTransientErrorRetry:
+    """A 503 "high demand" reply must not turn a feature's QA run into a smoke test."""
+
+    def _service(self, mock_client: MagicMock, sleeps: list) -> GeminiDiffTestGeneratorService:
+        return GeminiDiffTestGeneratorService(
+            api_key="test-api-key",
+            gemini_model="gemini-2.0-flash",
+            genai_client=mock_client,
+            sleep=sleeps.append,
+        )
+
+    def test_503_then_success_returns_the_gemini_plan(self):
+        mock_client = _make_mock_client(SAMPLE_GEMINI_UI_RESPONSE)
+        ok = mock_client.models.generate_content.return_value
+        mock_client.models.generate_content.side_effect = [_ApiError(503), _ApiError(429), ok]
+        sleeps: list = []
+
+        plan = self._service(mock_client, sleeps).generate_test_plan(diff=SAMPLE_UI_DIFF, commit_sha="sha")
+
+        assert plan.source == "gemini"
+        assert mock_client.models.generate_content.call_count == 3
+        assert sleeps == list(RETRY_DELAYS_SECONDS[:2])
+
+    def test_persistent_503_falls_back_degraded_after_all_attempts(self):
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = _ApiError(503)
+        sleeps: list = []
+
+        plan = self._service(mock_client, sleeps).generate_test_plan(diff=SAMPLE_UI_DIFF, commit_sha="sha")
+
+        assert plan.source == "fallback_baseline"
+        assert plan.degraded is True
+        assert mock_client.models.generate_content.call_count == len(RETRY_DELAYS_SECONDS) + 1
+        assert sleeps == list(RETRY_DELAYS_SECONDS)
+
+    def test_network_failure_is_retried(self):
+        import httpx
+
+        mock_client = _make_mock_client(SAMPLE_GEMINI_UI_RESPONSE)
+        ok = mock_client.models.generate_content.return_value
+        mock_client.models.generate_content.side_effect = [
+            httpx.ConnectError("connection reset"),
+            httpx.ReadTimeout("read timed out"),
+            ok,
+        ]
+        sleeps: list = []
+
+        plan = self._service(mock_client, sleeps).generate_test_plan(diff=SAMPLE_UI_DIFF, commit_sha="sha")
+
+        assert plan.source == "gemini"
+        assert sleeps == list(RETRY_DELAYS_SECONDS[:2])
+
+    def test_non_transient_error_is_not_retried(self):
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = _ApiError(400)
+        sleeps: list = []
+
+        plan = self._service(mock_client, sleeps).generate_test_plan(diff=SAMPLE_UI_DIFF, commit_sha="sha")
+
+        assert plan.degraded is True
+        assert mock_client.models.generate_content.call_count == 1
+        assert sleeps == []
 
 
 # --- Test: Degraded plans are not cached ---

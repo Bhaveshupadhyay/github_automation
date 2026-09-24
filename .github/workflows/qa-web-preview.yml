@@ -205,13 +205,121 @@ jobs:
                   print(f"::warning::Slack notice not sent: {e}")
           EOF
 
+  # Writes the test plan. agy runs first, on the Pro plan login restored from
+  # AGY_SESSION_DATA / AGY_AUTH_CONFIG, and the Gemini API is the fallback. That login
+  # belongs to a personal account, so this job only reads the pull request's code and
+  # never runs it: the app runs in `qa-preview`, on a runner that holds neither the
+  # login nor the API key. agy still reads the diff with commands auto-approved, so the
+  # login is deleted when the job ends; the owner accepted that risk for the registered
+  # repositories in contracts/qa-targets.json.
+  plan:
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TOOLING_DIR: ${{ github.workspace }}/tooling
+      RESULTS_DIR: ${{ github.workspace }}/qa-results
+    steps:
+      # `fetch-depth: 0` is required: the diff is computed against the base branch.
+      - name: Checkout frontend at the pull request head
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.resolve.outputs.repository }}
+          ref: ${{ needs.resolve.outputs.head_sha }}
+          token: ${{ secrets.QA_READ_TOKEN || github.token }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: frontend
+
+      - name: Checkout QA tooling
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: tooling
+
+      - name: Set up Python and uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "tooling/uv.lock"
+
+      - name: Install QA tooling
+        run: uv sync --project "$TOOLING_DIR" --extra qa
+
+      # Without the login there is no agy, and the generator goes straight to the API.
+      - name: Install agy and restore its login
+        env:
+          AGY_AUTH_CONFIG: ${{ secrets.AGY_AUTH_CONFIG }}
+          AGY_SESSION_DATA: ${{ secrets.AGY_SESSION_DATA }}
+        run: |
+          set -euo pipefail
+          if [ -z "$AGY_SESSION_DATA" ] && [ -z "$AGY_AUTH_CONFIG" ]; then
+            echo "::notice::No agy login configured; the test plan will come from the Gemini API."
+            exit 0
+          fi
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.gemini/antigravity-cli/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.gemini/antigravity-cli" >> "$GITHUB_PATH"
+          mkdir -p ~/.gemini/antigravity-cli ~/.gemini/config
+          if [ -n "$AGY_SESSION_DATA" ]; then
+            echo "$AGY_SESSION_DATA" | tr -d '\r\n ' | base64 -d > ~/.gemini/antigravity-cli/antigravity-oauth-token
+          fi
+          if [ -n "$AGY_AUTH_CONFIG" ]; then
+            echo "$AGY_AUTH_CONFIG" | tr -d '\r\n ' | base64 -d > ~/.gemini/oauth_creds.json
+          fi
+
+      # The plan is cached by diff content, so re-running an unchanged commit reuses it
+      # and makes no model call. Keys carry the repository: this cache is shared by
+      # every repository the pipeline serves.
+      - name: Restore the test plan cache
+        uses: actions/cache@v4
+        with:
+          path: frontend/.qa-cache/test-plans
+          key: qa-test-plan-${{ needs.resolve.outputs.repository }}-${{ needs.resolve.outputs.pr_number }}-${{ needs.resolve.outputs.head_sha }}
+          restore-keys: |
+            qa-test-plan-${{ needs.resolve.outputs.repository }}-${{ needs.resolve.outputs.pr_number }}-
+            qa-test-plan-${{ needs.resolve.outputs.repository }}-
+
+      - name: Generate the test plan from the diff
+        working-directory: frontend
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BASE_REF: ${{ needs.resolve.outputs.base_ref }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          # `fetch-depth: 0` already fetched every branch; the explicit fetch only covers
+          # a base branch that is somehow missing.
+          if ! git rev-parse --verify --quiet "refs/remotes/origin/${BASE_REF}" > /dev/null; then
+            git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          fi
+          uv run --project "$TOOLING_DIR" qa-test-gen \
+            --commit-sha "$HEAD_SHA" \
+            --base-branch "origin/$BASE_REF" \
+            --output "$RESULTS_DIR/plan.json"
+
+      - name: Remove the agy login
+        if: always()
+        run: rm -f ~/.gemini/antigravity-cli/antigravity-oauth-token ~/.gemini/oauth_creds.json
+
+      - name: Hand the plan to the preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-plan-${{ github.run_id }}
+          path: qa-results/plan.json
+          retention-days: 1
+          if-no-files-found: error
+
   # Runs the pull request's code. GitHub hands every secret a job references to its
   # runner, where that code has sudo, so this job references no token that can write to
   # the pull request and no storage credential: those belong to `publish`, on a separate
   # runner. Clones use a read-only token — QA_READ_TOKEN for private repositories, else
   # this run's own token, which can read public ones.
   qa-preview:
-    needs: resolve
+    needs: [resolve, plan]
     if: needs.resolve.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -378,36 +486,11 @@ jobs:
           echo "✅ Services healthy."
           tail -n 40 "$RUNNER_TEMP/lifecycle.log" || true
 
-      # 5. The plan is cached by diff content, so re-running an unchanged commit reuses it
-      #    and makes no model call. Keys carry the repository: this cache is shared by
-      #    every repository the pipeline serves.
-      - name: Restore the test plan cache
-        uses: actions/cache@v4
+      - name: Collect the test plan
+        uses: actions/download-artifact@v4
         with:
-          path: frontend/.qa-cache/test-plans
-          key: qa-test-plan-${{ needs.resolve.outputs.repository }}-${{ needs.resolve.outputs.pr_number }}-${{ needs.resolve.outputs.head_sha }}
-          restore-keys: |
-            qa-test-plan-${{ needs.resolve.outputs.repository }}-${{ needs.resolve.outputs.pr_number }}-
-            qa-test-plan-${{ needs.resolve.outputs.repository }}-
-
-      - name: Generate the test plan from the diff
-        working-directory: frontend
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BASE_REF: ${{ needs.resolve.outputs.base_ref }}
-          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
-        run: |
-          set -euo pipefail
-          # `fetch-depth: 0` already fetched every branch; the explicit fetch only covers
-          # a base branch that is somehow missing, and needs no credentials for a public
-          # repository.
-          if ! git rev-parse --verify --quiet "refs/remotes/origin/${BASE_REF}" > /dev/null; then
-            git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          fi
-          uv run --project "$TOOLING_DIR" qa-test-gen \
-            --commit-sha "$HEAD_SHA" \
-            --base-branch "origin/$BASE_REF" \
-            --output "$RESULTS_DIR/plan.json"
+          name: qa-plan-${{ github.run_id }}
+          path: qa-results
 
       - name: Cache Playwright browsers
         id: playwright_cache
@@ -610,6 +693,7 @@ jobs:
             --pr "$TARGET_PR" \
             --sha "$HEAD_SHA" \
             --test-result "$RESULTS_DIR/run.json" \
+            --plan "$RESULTS_DIR/plan.json" \
             --media-result "$RESULTS_DIR/media.json" \
             --branch-result "$RESULTS_DIR/branch.json" \
             --run-url "$RUN_URL"

@@ -123,7 +123,7 @@ def get_commit_sha() -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate QA test plans from git diffs using Gemini analysis.",
+        description="Generate QA test plans from git diffs with agy, falling back to the Gemini API.",
         prog="qa-test-gen",
     )
     parser.add_argument(

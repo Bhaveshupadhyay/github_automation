@@ -323,6 +323,30 @@ class TestSafetyLimits:
         assert "more failing journey" in body
 
 
+class TestPlanFallbackNotice:
+    def test_degraded_plan_says_the_change_was_not_tested(self, formatter):
+        body = formatter.format(passing_report(plan_fallback=True, plan_degraded=True))
+
+        assert "This run did not test your change" in body
+        assert "Re-run the workflow job" in body
+
+    def test_no_ui_changes_fallback_is_explained(self, formatter):
+        body = formatter.format(passing_report(plan_fallback=True))
+
+        assert "No user-facing changes were found" in body
+        assert "did not test your change" not in body
+
+    def test_generated_plan_has_no_notice(self, formatter):
+        body = formatter.format(passing_report())
+
+        assert "smoke test" not in body
+
+    def test_slack_text_flags_a_degraded_plan(self, formatter):
+        text = formatter.format_slack_text(passing_report(plan_fallback=True, plan_degraded=True))
+
+        assert "No test plan could be generated" in text
+
+
 class TestSlackText:
     def test_passing_summary_is_concise(self, formatter):
         text = formatter.format_slack_text(passing_report())

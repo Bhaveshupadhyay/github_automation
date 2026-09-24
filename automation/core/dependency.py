@@ -26,6 +26,7 @@ from automation.interfaces import (
     ISchemaDetectorService,
     IWireGuardService,
     IDiffTestGeneratorService,
+    ITestPlanEngine,
     ITestRunnerService,
     IMediaProcessorService,
     IStorageProvider,
@@ -66,6 +67,7 @@ from automation.services.lifecycle_supervisor_service import LifecycleSupervisor
 from automation.services.schema_detection_service import SchemaDetectionService
 from automation.services.wireguard_service import WireGuardService
 from automation.services.gemini_diff_test_generator_service import GeminiDiffTestGeneratorService
+from automation.services.agy_test_plan_engine import AgyTestPlanEngine
 from automation.services.playwright_test_runner_service import PlaywrightTestRunnerService
 from automation.services.maestro_test_runner_service import MaestroTestRunnerService
 from automation.services.ffmpeg_media_processor_service import FFmpegMediaProcessorService
@@ -241,12 +243,14 @@ def get_diff_test_generator_service(
     api_key: Optional[str] = None,
     gemini_model: Optional[str] = None,
     genai_client: Optional[object] = None,
+    primary_engine: Optional[ITestPlanEngine] = None,
 ) -> IDiffTestGeneratorService:
-    """Returns IDiffTestGeneratorService implementation (Gemini-powered)."""
+    """Returns IDiffTestGeneratorService implementation: agy first, then the Gemini API."""
     return GeminiDiffTestGeneratorService(
         api_key=api_key,
         gemini_model=gemini_model,
         genai_client=genai_client,
+        primary_engine=primary_engine or AgyTestPlanEngine(),
     )
 
 

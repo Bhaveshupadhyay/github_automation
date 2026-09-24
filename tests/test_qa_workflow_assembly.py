@@ -48,6 +48,11 @@ def _step(job: dict, fragment: str) -> dict:
     return job["steps"][_step_index(job, fragment)]
 
 
+def _plan_job(document: dict) -> dict:
+    """The job that writes the test plan: `plan` where agy runs, else the preview itself."""
+    return document["jobs"].get("plan") or _job(document, "qa-preview")
+
+
 def _workflows():
     for name, platform in QA_WORKFLOWS.items():
         yield name, platform, _load(WORKFLOW_DIR / name)
@@ -115,7 +120,7 @@ class TestJobStructure(unittest.TestCase):
         for name, _, document in _workflows():
             with self.subTest(workflow=name):
                 job = _job(document, "qa-preview")
-                self.assertEqual(job["needs"], "resolve")
+                self.assertIn(job["needs"], ("resolve", ["resolve", "plan"]))
                 self.assertIn("needs.resolve.outputs.skip == 'false'", job["if"])
 
     def test_publishing_runs_after_a_failed_preview_but_not_a_cancelled_one(self) -> None:
@@ -359,7 +364,11 @@ class TestStepOrdering(unittest.TestCase):
         for name, _, document in _workflows():
             job = _job(document, "qa-preview")
             with self.subTest(workflow=name):
-                self.assertLess(_step_index(job, "Generate the test plan"), _step_index(job, "Execute the"))
+                if "plan" in document["jobs"]:
+                    self.assertIn("plan", job["needs"])
+                    self.assertLess(_step_index(job, "Collect the test plan"), _step_index(job, "Execute the"))
+                else:
+                    self.assertLess(_step_index(job, "Generate the test plan"), _step_index(job, "Execute the"))
 
 
 class TestCommitIdentity(unittest.TestCase):
@@ -437,19 +446,44 @@ class TestCaching(unittest.TestCase):
             for step in job["steps"]
         )
         self.assertIn("ms-playwright", joined)
-        self.assertIn("test-plans", joined)
         self.assertIn("npm", joined)
+        plan_cache = _step(_job(_load(WORKFLOW_DIR / "qa-web-preview.yml"), "plan"), "Restore the test plan cache")
+        self.assertIn("test-plans", plan_cache["with"]["path"])
 
     def test_the_plan_cache_is_scoped_to_the_repository(self) -> None:
         """This cache is shared by every repository served. Unscoped, PR #7 in one
         repository would restore the plan of PR #7 in another."""
         for name, _, document in _workflows():
             with self.subTest(workflow=name):
-                cache = _step(_job(document, "qa-preview"), "Restore the test plan cache")
+                cache = _step(_plan_job(document), "Restore the test plan cache")
                 self.assertIn("needs.resolve.outputs.repository", cache["with"]["key"])
                 self.assertIn("restore-keys", cache["with"])
                 for line in cache["with"]["restore-keys"].strip().splitlines():
                     self.assertIn("needs.resolve.outputs.repository", line)
+
+
+
+class TestAgyPlanJob(unittest.TestCase):
+    """The agy login belongs to a personal account: it stays off the runner that runs PR code."""
+
+    def test_the_agy_login_and_api_key_are_held_only_by_the_plan_job(self) -> None:
+        document = _load(WORKFLOW_DIR / "qa-web-preview.yml")
+        preview = str(_job(document, "qa-preview"))
+        for secret in ("AGY_SESSION_DATA", "AGY_AUTH_CONFIG", "GEMINI_API_KEY"):
+            self.assertNotIn(f"secrets.{secret}", preview, secret)
+            self.assertIn(f"secrets.{secret}", str(_job(document, "plan")), secret)
+
+    def test_the_plan_job_never_runs_the_pull_requests_code(self) -> None:
+        plan = _job(_load(WORKFLOW_DIR / "qa-web-preview.yml"), "plan")
+        runs = " ".join(str(step.get("run", "")) for step in plan["steps"])
+        for command in ("npm ", "npx ", "yarn ", "pnpm ", "prepare", "lifecycle"):
+            self.assertNotIn(command, runs)
+
+    def test_the_login_is_removed_even_when_generation_fails(self) -> None:
+        plan = _job(_load(WORKFLOW_DIR / "qa-web-preview.yml"), "plan")
+        removal = _step(plan, "Remove the agy login")
+        self.assertIn("always()", str(removal["if"]))
+        self.assertLess(_step_index(plan, "Generate the test plan"), _step_index(plan, "Remove the agy login"))
 
 
 if __name__ == "__main__":
