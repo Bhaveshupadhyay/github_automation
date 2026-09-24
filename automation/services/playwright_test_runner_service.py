@@ -41,6 +41,32 @@ def _best_match(build, grace_ms=2000):
         return build(False).filter(visible=True).first
 
 
+def _xpath_literal(text):
+    """`text` as an XPath 1.0 string literal, which has no escapes: mixed quotes need concat()."""
+    if "'" not in text:
+        return f"'{text}'"
+    if '"' not in text:
+        return f'"{text}"'
+    return "concat(" + ", \"'\", ".join(f"'{part}'" for part in text.split("'")) + ")"
+
+
+def _beside_label(page, target, exact, controls):
+    """The first control after a <label> reading `target` that is not tied to it.
+
+    A <label> with no `for` and no nested control labels nothing for get_by_label, yet it is
+    the text a user sees above the field (`<label>Post Title *</label><input>`).
+    """
+    text = _xpath_literal(target)
+    match = f"normalize-space(.)={text}" if exact else f"contains(normalize-space(.), {text})"
+    return page.locator(f"xpath=//label[{match}]/following::*[{controls}][1]")
+
+
+_TEXT_CONTROLS = (
+    "self::textarea or self::input[not(@type='hidden' or @type='checkbox' or @type='radio'"
+    " or @type='submit' or @type='button' or @type='file')]"
+)
+
+
 def _clickable(page, target):
     """A button or link by its accessible name: its text, aria-label, or (icon-only) title."""
     return _best_match(lambda exact: (
@@ -56,6 +82,7 @@ def _text_field(page, target):
         .or_(page.get_by_placeholder(target, exact=exact))
         .or_(page.get_by_role("textbox", name=target, exact=exact))
         .or_(page.get_by_role("searchbox", name=target, exact=exact))
+        .or_(_beside_label(page, target, exact, _TEXT_CONTROLS))
     ))
 
 
@@ -64,13 +91,15 @@ def _dropdown(page, target):
     return _best_match(lambda exact: (
         page.get_by_label(target, exact=exact)
         .or_(page.get_by_role("combobox", name=target, exact=exact))
+        .or_(_beside_label(page, target, exact, "self::select"))
         .or_(page.locator("select").filter(has=page.get_by_role("option", name=target, exact=exact)))
     ))
 
 
 # Written into generated scripts, so they find elements exactly as execute() does.
 _LOCATOR_HELPERS_SOURCE = "\n\n".join(
-    inspect.getsource(fn) for fn in (_best_match, _clickable, _text_field, _dropdown)
+    [f"_TEXT_CONTROLS = {_TEXT_CONTROLS!r}"]
+    + [inspect.getsource(fn) for fn in (_best_match, _xpath_literal, _beside_label, _clickable, _text_field, _dropdown)]
 )
 
 

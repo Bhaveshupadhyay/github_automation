@@ -400,6 +400,36 @@ class TestLocatorHelpers:
         _dropdown(self.page, "All Categories").select_option("Music", timeout=3000)
         assert self.page.locator("#category").input_value() == "Music"
 
+    # The admin form of hiphopboombox_web#6: labels sit beside their controls, tied by
+    # neither `for` nor nesting, and the placeholders say something else.
+    UNLINKED_FORM = """
+      <div><label>Filter Category:</label>
+        <select id="filter"><option>All Categories</option><option>Music</option></select></div>
+      <div><label>Post Title <span>*</span></label><input id="title" placeholder="Enter post title..." /></div>
+      <div><label>Description <span>*</span></label><textarea id="desc" placeholder="Enter post description..."></textarea></div>
+      <div><label>Category</label><select id="cat"><option>News</option><option>Music</option></select></div>
+      <div><label>It's "quoted"</label><input id="quoted" /></div>
+    """
+
+    def test_fill_finds_a_field_beside_an_unlinked_label(self):
+        self.page.set_content(self.UNLINKED_FORM)
+        _text_field(self.page, "Post Title *").fill("New release", timeout=3000)
+        _text_field(self.page, "Description *").fill("Body", timeout=3000)
+        assert self.page.locator("#title").input_value() == "New release"
+        assert self.page.locator("#desc").input_value() == "Body"
+
+    def test_select_finds_a_dropdown_beside_an_unlinked_label(self):
+        self.page.set_content(self.UNLINKED_FORM)
+        _dropdown(self.page, "Filter Category:").select_option("Music", timeout=3000)
+        _dropdown(self.page, "Category").select_option("Music", timeout=3000)
+        assert self.page.locator("#filter").input_value() == "Music"
+        assert self.page.locator("#cat").input_value() == "Music"
+
+    def test_unlinked_label_text_with_both_quote_kinds(self):
+        self.page.set_content(self.UNLINKED_FORM)
+        _text_field(self.page, 'It\'s "quoted"').fill("ok", timeout=3000)
+        assert self.page.locator("#quoted").input_value() == "ok"
+
     def test_click_waits_for_an_exact_match_before_taking_a_partial_one(self):
         self.page.set_content(
             """<button onclick="document.title='draft'">Save draft</button>
