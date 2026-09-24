@@ -6,6 +6,7 @@ import logging
 import subprocess
 from typing import Callable, Optional
 
+from automation.services.agy_binary import find_agy_binary
 from automation.domain.constants import SpecialTags, DEFAULT_AGY_MODEL
 from automation.domain import TaskIntent, TaskCategory, WorkflowEnvironment, GitPRDetails
 from automation.domain.telemetry import PipelineStage
@@ -58,24 +59,7 @@ class CodeDevelopmentService(ICodeDevelopmentService):
 
     def _resolve_agy_binary(self) -> str:
         """Finds the absolute path to the agy CLI binary across system PATH and standard install directories."""
-        path_which = shutil.which("agy")
-        if path_which and os.path.exists(path_which):
-            return path_which
-
-        home = os.path.expanduser("~")
-        candidate_paths = [
-            os.path.join(home, ".local", "bin", "agy"),
-            os.path.join(home, ".gemini", "antigravity-cli", "bin", "agy"),
-            os.path.join(home, ".gemini", "antigravity-cli", "agy"),
-            "/usr/local/bin/agy",
-            "/usr/bin/agy",
-        ]
-        for p in candidate_paths:
-            if os.path.exists(p) and os.access(p, os.X_OK):
-                logger.info(f"📍 Resolved agy binary at explicit path: {p}")
-                return p
-
-        return "agy"
+        return find_agy_binary() or "agy"
 
     def _parse_activity_line(self, line: str) -> Optional[str]:
         """Extracts concise agent activity description from agy CLI stdout line."""
