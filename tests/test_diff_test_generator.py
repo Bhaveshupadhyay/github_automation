@@ -693,6 +693,23 @@ class TestTransientErrorRetry:
         assert mock_client.models.generate_content.call_count == len(RETRY_DELAYS_SECONDS) + 1
         assert sleeps == list(RETRY_DELAYS_SECONDS)
 
+    def test_network_failure_is_retried(self):
+        import httpx
+
+        mock_client = _make_mock_client(SAMPLE_GEMINI_UI_RESPONSE)
+        ok = mock_client.models.generate_content.return_value
+        mock_client.models.generate_content.side_effect = [
+            httpx.ConnectError("connection reset"),
+            httpx.ReadTimeout("read timed out"),
+            ok,
+        ]
+        sleeps: list = []
+
+        plan = self._service(mock_client, sleeps).generate_test_plan(diff=SAMPLE_UI_DIFF, commit_sha="sha")
+
+        assert plan.source == "gemini"
+        assert sleeps == list(RETRY_DELAYS_SECONDS[:2])
+
     def test_non_transient_error_is_not_retried(self):
         mock_client = MagicMock()
         mock_client.models.generate_content.side_effect = _ApiError(400)

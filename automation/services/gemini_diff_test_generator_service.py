@@ -15,6 +15,11 @@ except ImportError:
     genai = None
     types = None
 
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
 from automation.domain.test_plan import (
     ActionType,
     AssertionType,
@@ -49,6 +54,9 @@ PROMPT_VERSION = "4"
 # test of the homepage.
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 RETRY_DELAYS_SECONDS = (5, 15, 40)
+
+# Connection resets, DNS failures and timeouts carry no HTTP status, and clear just as fast.
+TRANSIENT_ERROR_TYPES = (ConnectionError, TimeoutError) + ((httpx.TransportError,) if httpx else ())
 
 GEMINI_SYSTEM_PROMPT = """You are a QA test plan generator. You analyze git diffs to identify user-facing UI changes
 and produce structured test plans.
@@ -233,8 +241,10 @@ class GeminiDiffTestGeneratorService(IDiffTestGeneratorService):
 
     @staticmethod
     def _is_retryable(error: Exception) -> bool:
-        """True for errors a later attempt can succeed past: overload, rate limit, server fault."""
-        return getattr(error, "code", None) in RETRYABLE_STATUS_CODES
+        """True for errors a later attempt can succeed past: overload, rate limit, server fault, network."""
+        if getattr(error, "code", None) in RETRYABLE_STATUS_CODES:
+            return True
+        return isinstance(error, TRANSIENT_ERROR_TYPES)
 
     def _generate_with_retry(self, client: Any, user_prompt: str) -> Any:
         """Call Gemini, retrying transient failures with backoff before giving up."""
