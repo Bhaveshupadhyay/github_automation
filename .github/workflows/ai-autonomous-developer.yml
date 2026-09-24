@@ -88,7 +88,19 @@ jobs:
 
       - name: Install Antigravity CLI (agy)
         run: |
-          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          set -euo pipefail
+          SCRIPT="$RUNNER_TEMP/agy-install.sh"
+          curl -fsSL --compressed --retry 3 --retry-all-errors -o "$SCRIPT" https://antigravity.google/cli/install.sh
+          # The server has sent this script gzipped without a Content-Encoding header,
+          # which `curl | bash` then tried to run as shell.
+          if [ "$(head -c 2 "$SCRIPT" | od -An -tx1 | tr -d ' \n')" = "1f8b" ]; then
+            gunzip -c "$SCRIPT" > "$SCRIPT.plain" && mv "$SCRIPT.plain" "$SCRIPT"
+          fi
+          if ! head -n 1 "$SCRIPT" | grep -q '^#!'; then
+            echo "::error::The agy install script did not download as a shell script."
+            exit 1
+          fi
+          bash "$SCRIPT"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           echo "$HOME/.gemini/antigravity-cli/bin" >> $GITHUB_PATH
           echo "$HOME/.gemini/antigravity-cli" >> $GITHUB_PATH
